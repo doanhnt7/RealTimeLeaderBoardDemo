@@ -12,7 +12,7 @@ SET 'table.exec.mini-batch.allow-latency' = '6 s';
 SET 'table.exec.mini-batch.size' = '10000';
 
 -- // Insert top teams results into a Kafka topic
-ADD JAR 'file:///tmp/connector/flink-sql-connector-kafka-3.3.0-1.20.jar';
+ADD JAR 'file:///tmp/connector/flink-sql-connector-kafka-4.0.0-2.0.jar';
 ADD JAR 'file:///tmp/connector/flink-sql-avro-confluent-registry-1.20.1.jar';
 
 INSERT INTO top_teams
