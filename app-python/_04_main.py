@@ -39,7 +39,7 @@ def setup_logging(level: str = "INFO"):
 
 
 
-async def start_producer(kafka_bootstrap_servers: str, rate: int, users_topic: str = "users", num_user: int = 100, num_app: int = 3):
+async def start_producer(kafka_bootstrap_servers: str, rate: int, users_topic: str, num_user: int, num_app: int):
     """Start the realtime user producer publishing directly to Kafka"""
     logger = structlog.get_logger()
     logger.info("Starting realtime user producer...", rate=rate, topic=users_topic)

@@ -53,9 +53,9 @@ class UserDataGenerator:
         # Build ISO strings with milliseconds and Z suffix
         iso_ms = now.astimezone(timezone.utc).isoformat(timespec='milliseconds')
         iso_z = iso_ms.replace('+00:00', 'Z')
-        last_login_iso_date = f"ISODate('{iso_z}')"
-        created_iso_date = f"ISODate('{iso_z}')"
-        updated_iso_date = f"ISODate('{iso_z}')"
+        last_login_iso_date = iso_z
+        created_iso_date = iso_z
+        updated_iso_date = iso_z
 
         base = self._fixed_users[uid]
         # Compose document with explicit key order
@@ -91,7 +91,7 @@ class UserDataGenerator:
 #   "avatar": "1..20 (string)",
 #   "geo": "US|UK|DE|FR|JP|VN",                 # fixed per uid
 #   "role": "string (uuid)",                    # fixed per uid
-#   "lastLoginAt": ISODate('YYYY-MM-DDTHH:MM:SS.mmmZ'),
+#   "lastLoginAt": "YYYY-MM-DDTHH:MM:SS.mmmZ",
 #   "name": "Player 12345678",                  # fixed per uid
 #   "devices": [                                 # fixed per uid
 #     {
@@ -101,10 +101,10 @@ class UserDataGenerator:
 #     }
 #   ],
 #   "resources": [],
-#   "created_at": ISODate('YYYY-MM-DDTHH:MM:SS.mmmZ'),
-#   "updated_at": ISODate('YYYY-MM-DDTHH:MM:SS.mmmZ'),
+#   "created_at": "YYYY-MM-DDTHH:MM:SS.mmmZ",
+#   "updated_at": "YYYY-MM-DDTHH:MM:SS.mmmZ",
 #   "level": 1..300,
-#   "updatedAt": ISODate('YYYY-MM-DDTHH:MM:SS.mmmZ'),
+#   "updatedAt": "YYYY-MM-DDTHH:MM:SS.mmmZ",
 #   "teamId": 1..10
 # }
 # ----------------------------------------------------------
