@@ -1,0 +1,22 @@
+[tasks]
+
+# Start only the Redis service defined in docker-compose.yml
+[tasks.redis-up]
+run = "docker compose -f docker/docker-compose.yml up -d redis"
+
+[tasks.docker-up]
+run = "docker compose -f docker/docker-compose.yml up -d"
+
+# Stop all services (optional convenience)
+[tasks.docker-down]
+run = "docker compose -f docker/docker-compose.yml down"
+
+# Run Redis benchmark against the running redis container
+# Depends on redis being up; will start it if not already running
+[tasks.redis-bench]
+depends = ["redis-up"]
+run = "docker exec redis redis-benchmark -t zadd -n 10000000 -c 50 -d 16 -k 1 -r 1000000000 -P 10 --threads 10"  # 512KB 524288
+
+[tasks.start-producer]
+run = "docker compose -f docker/docker-compose.yml exec -it data-generator python _04_main.py start-producer"
+
