@@ -1,5 +1,5 @@
 """
-Main entry point for the realtime user producer (Kafka only)
+Main entry point for the realtime user producer (MongoDB -> Debezium CDC)
 """
 
 import asyncio
@@ -35,15 +35,15 @@ def setup_logging(level: str = "INFO"):
     logging.basicConfig(level=getattr(logging, level.upper()))
 
 
-# No database or Debezium setup needed
+# MongoDB is used as the sink; Debezium should capture CDC to Kafka
 
 
 
-async def start_producer(kafka_bootstrap_servers: str, rate: int, users_topic: str, num_user: int, num_app: int):
-    """Start the realtime user producer publishing directly to Kafka"""
+async def start_producer(rate: int, num_user: int, num_app: int):
+    """Start the realtime user producer writing to MongoDB"""
     logger = structlog.get_logger()
-    logger.info("Starting realtime user producer...", rate=rate, topic=users_topic)
-    producer = RealtimeDataProducer(kafka_bootstrap_servers=kafka_bootstrap_servers, sleep_rate=rate, users_topic=users_topic, num_user=num_user, num_app=num_app)
+    logger.info("Starting realtime user producer...", rate=rate, mongo_uri=config.MONGO_URI, db=config.MONGO_DB, collection=config.MONGO_COLLECTION)
+    producer = RealtimeDataProducer(mongo_uri=config.MONGO_URI, mongo_db=config.MONGO_DB, mongo_collection=config.MONGO_COLLECTION, sleep_rate=rate, num_user=num_user, num_app=num_app)
     
     try:
         await producer.initialize()
@@ -59,7 +59,7 @@ async def start_producer(kafka_bootstrap_servers: str, rate: int, users_topic: s
 
 def create_parser():
     """Create command line argument parser"""
-    parser = argparse.ArgumentParser(description='Realtime User Producer (Kafka)')
+    parser = argparse.ArgumentParser(description='Realtime User Producer (MongoDB -> Debezium)')
     
     # Global options
     parser.add_argument('--log-level', 
@@ -74,7 +74,10 @@ def create_parser():
     producer_parser.add_argument('--rate', type=int, help='Events per second')
     producer_parser.add_argument('--num-user', type=int, default=100, help='Number of unique users to pre-initialize')
     producer_parser.add_argument('--num-app', type=int, default=1, help='Number of apps to randomly assign per user')
-    producer_parser.add_argument('--topic', type=str, default='users', help='Kafka topic name')
+    # Mongo connection overrides
+    producer_parser.add_argument('--mongo-uri', type=str, help='MongoDB connection string')
+    producer_parser.add_argument('--mongo-db', type=str, help='MongoDB database name')
+    producer_parser.add_argument('--mongo-collection', type=str, help='MongoDB collection name')
     
     return parser
 
@@ -94,10 +97,15 @@ async def main():
     
     try:
         if args.command == 'start-producer':
+            # Override config with CLI if provided
+            if args.mongo_uri:
+                config.MONGO_URI = args.mongo_uri
+            if args.mongo_db:
+                config.MONGO_DB = args.mongo_db
+            if args.mongo_collection:
+                config.MONGO_COLLECTION = args.mongo_collection
             await start_producer(
-                kafka_bootstrap_servers=config.KAFKA_BOOTSTRAP_SERVERS,
                 rate=(args.rate or config.SLEEP_RATE),
-                users_topic=(args.topic or config.USERS_TOPIC),
                 num_user=args.num_user,
                 num_app=args.num_app,
             )

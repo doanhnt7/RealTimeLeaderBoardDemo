@@ -1,0 +1,23 @@
+{
+  "name": "mongo-leaderboard-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
+    "tasks.max": "1",
+    "mongodb.hosts": "rs0/mongo:27017",
+    "mongodb.name": "mongo_cdc",
+    "mongodb.members.auto.discover": "false",
+    "topic.prefix": "mongo_cdc",
+    "collection.include.list": "leaderboard.user_submissions",
+    "mongodb.uuid.representation": "standard",
+    "capture.mode.name": "change_streams_update_full",
+    "transforms": "unwrap,routeToSingle",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewDocumentState",
+    "transforms.unwrap.drop.tombstones": "true",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    "transforms.routeToSingle.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.routeToSingle.regex": ".*",
+    "transforms.routeToSingle.replacement": "leaderboard_update"
+  }
+}
+
+

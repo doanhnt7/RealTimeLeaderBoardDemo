@@ -1,4 +1,29 @@
 services:
+  mongo:
+    image: mongo:6.0
+    container_name: mongo
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  mongo-init-replica:
+    image: mongo:6.0
+    container_name: mongo-init-replica
+    depends_on:
+      mongo:
+        condition: service_healthy
+    entrypoint: ["sh", "-c", "mongosh --host mongo:27017 --quiet --eval 'rs.initiate({_id: \"rs0\", members: [{ _id: 0, host: \"mongo:27017\" }]})' || true"]
+    restart: "no"
+
   redis:
     image: redis:7-alpine
     container_name: redis
@@ -36,6 +61,34 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  kafka-connect:
+    image: debezium/connect:2.7
+    container_name: kafka-connect
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-status
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      REST_ADVERTISED_HOST_NAME: kafka-connect
+      REST_ADVERTISED_PORT: 8083
+      ENABLE_DEBEZIUM_SCRIPTING: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
   
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -115,14 +168,16 @@ services:
       dockerfile: Dockerfile
     hostname: data-generator
     depends_on:
-      kafka:
+      mongo:
         condition: service_healthy
+      mongo-init-replica:
+        condition: service_completed_successfully
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_CONNECT_URL: http://kafka-connect:8083
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: leaderboard
+      MONGO_COLLECTION: user_submissions
       LOG_LEVEL: INFO
       SLEEP_RATE: 10
-      USERS_TOPIC: users
     volumes:
       - ../app-python:/app
     working_dir: /app

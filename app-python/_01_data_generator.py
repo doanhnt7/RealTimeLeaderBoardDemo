@@ -18,6 +18,10 @@ class UserDataGenerator:
         self.app_ids: List[str] = [f"app_{i:03d}" for i in range(1, safe_num_app + 1)]
         # Pre-generate user uids from 1 to num_user
         self.user_uids: List[str] = [f"user_{i}" for i in range(1, num_user + 1)]
+        # Initialize per-user level state (starting from a random base like before)
+        self._user_levels: Dict[str, int] = {
+            uid: 0 for uid in self.user_uids
+        }
         # Pre-initialize fixed user data to keep constant fields stable across generations
         # Fixed fields: _id, uid, appId, avatar, role, name, devices, email, authProvider, resources
         self._fixed_users: Dict[str, Dict[str, Any]] = {}
@@ -50,6 +54,11 @@ class UserDataGenerator:
         uid = random.choice(self.user_uids)
         # Dynamic fields only below (fixed are loaded from cache)
         
+        
+        weights = [10 - i for i in range(10)]  # [10,9,8,...,1]
+        increase = random.choices(range(1, 11), weights=weights, k=1)[0]
+        self._user_levels[uid] += increase
+        
         # Build ISO strings with milliseconds and Z suffix
         iso_ms = now.astimezone(timezone.utc).isoformat(timespec='milliseconds')
         iso_z = iso_ms.replace('+00:00', 'Z')
@@ -74,9 +83,9 @@ class UserDataGenerator:
             "resources": base["resources"],
             "created_at": created_iso_date,
             "updated_at": updated_iso_date,
-            "level": self.fake.random_int(min=1, max=300),
+            "level": self._user_levels[uid],
             "updatedAt": updated_iso_date,
-            "teamId": self.fake.random_int(min=1, max=10),
+            "team": self.fake.random_int(min=1, max=10),
         }
         return document
 
@@ -105,6 +114,6 @@ class UserDataGenerator:
 #   "updated_at": "YYYY-MM-DDTHH:MM:SS.mmmZ",
 #   "level": 1..300,
 #   "updatedAt": "YYYY-MM-DDTHH:MM:SS.mmmZ",
-#   "teamId": 1..10
+#   "team": 1..10
 # }
 # ----------------------------------------------------------
