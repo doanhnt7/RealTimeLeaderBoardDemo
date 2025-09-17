@@ -63,7 +63,7 @@ services:
       retries: 5
 
   kafka-connect:
-    image: debezium/connect:2.7
+    image: debezium/connect:2.5
     container_name: kafka-connect
     depends_on:
       kafka:
