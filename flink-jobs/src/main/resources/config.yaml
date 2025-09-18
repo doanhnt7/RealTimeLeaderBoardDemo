@@ -1,7 +1,3 @@
-redis:
-  host: redis
-  port: 6379
-
 blob:
   server:
     port: '6124'
@@ -23,6 +19,9 @@ rest:
   flamegraph:
     enabled: true
   address: 0.0.0.0
+redis:
+  port: 6379
+  host: redis
 jobmanager:
   rpc:
     address: jobmanager

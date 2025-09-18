@@ -1,11 +1,11 @@
 package jobs.processors;
 
-import jobs.models.UserScore;
+import jobs.models.User;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import redis.clients.jedis.JedisPooled;
 import org.apache.flink.api.common.functions.OpenContext;
 
-public class RedisUserAllTimeWriter extends RichMapFunction<UserScore, UserScore> {
+public class RedisUserAllTimeWriter extends RichMapFunction<User, User> {
     private final String redisHost;
     private final int redisPort;
     private transient JedisPooled jedis;
@@ -21,7 +21,7 @@ public class RedisUserAllTimeWriter extends RichMapFunction<UserScore, UserScore
     }
 
     @Override
-    public UserScore map(UserScore value) {
+    public User map(User value) {
         if (value != null) {
             String uid = value.getUid();
             int level = value.getLevel();

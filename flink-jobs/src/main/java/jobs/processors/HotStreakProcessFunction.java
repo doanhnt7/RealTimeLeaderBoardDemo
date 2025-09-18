@@ -1,7 +1,7 @@
 package jobs.processors;
 
 import jobs.models.HotStat;
-import jobs.models.UserScore;
+import jobs.models.User;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
@@ -9,7 +9,7 @@ import org.apache.flink.api.common.functions.OpenContext;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
-public class HotStreakProcessFunction extends KeyedProcessFunction<String, UserScore, HotStat> {
+public class HotStreakProcessFunction extends KeyedProcessFunction<String, User, HotStat> {
 	private final long shortWindowMs;
 	private final long longWindowMs;
 	private transient Deque<Tuple2<Long, Integer>> shortDeque;
@@ -29,7 +29,7 @@ public class HotStreakProcessFunction extends KeyedProcessFunction<String, UserS
 	}
 
 	@Override
-	public void processElement(UserScore value, Context ctx, Collector<HotStat> out) {
+	public void processElement(User value, Context ctx, Collector<HotStat> out) {
 		long ts = value.getEventTimeMillis();
 		shortDeque.addLast(Tuple2.of(ts, value.getScore()));
 		longDeque.addLast(Tuple2.of(ts, value.getScore()));

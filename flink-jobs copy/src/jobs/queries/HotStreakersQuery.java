@@ -7,9 +7,9 @@ import static org.apache.flink.table.api.Expressions.*;
 
 public class HotStreakersQuery {
     
-    public static Table createHotStreakersTable(TableEnvironment tableEnv, Table userScores) {
+    public static Table createHotStreakersTable(TableEnvironment tableEnv, Table Users) {
         // Hot Streakers Query using Table API for window functions
-        Table shortTermAgg = userScores
+        Table shortTermAgg = Users
             .window(Over.partitionBy($("user_id"))
                 .orderBy($("event_time"))
                 .preceding(lit(10).second())

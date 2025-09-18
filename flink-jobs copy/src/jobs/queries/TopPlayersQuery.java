@@ -7,9 +7,9 @@ import static org.apache.flink.table.api.Expressions.*;
 
 public class TopPlayersQuery {
     
-    public static Table createTopPlayersTable(TableEnvironment tableEnv, Table userScores) {
+    public static Table createTopPlayersTable(TableEnvironment tableEnv, Table Users) {
         // Top Players Query using Table API + SQL for ranking
-        Table playerAgg = userScores
+        Table playerAgg = Users
             .groupBy($("user_id"))
             .select(
                 $("user_id"),

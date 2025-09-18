@@ -5,9 +5,9 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.DataTypes;
 import static org.apache.flink.table.api.Expressions.*;
 
-public class UserScoresProcessor {
+public class UsersProcessor {
     
-    public static Table createUserScoresView(TableEnvironment tableEnv, Table usersRaw) {
+    public static Table createUsersView(TableEnvironment tableEnv, Table usersRaw) {
         // Create user_scores view using Table API
         return usersRaw
             .select(

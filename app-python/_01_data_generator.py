@@ -59,12 +59,10 @@ class UserDataGenerator:
         increase = random.choices(range(1, 11), weights=weights, k=1)[0]
         self._user_levels[uid] += increase
         
-        # Build ISO strings with milliseconds and Z suffix
-        iso_ms = now.astimezone(timezone.utc).isoformat(timespec='milliseconds')
-        iso_z = iso_ms.replace('+00:00', 'Z')
-        last_login_iso_date = iso_z
-        created_iso_date = iso_z
-        updated_iso_date = iso_z
+        # Use native datetime (stored as BSON Date in MongoDB)
+        created_dt = now
+        updated_dt = now
+        last_login_dt = now
 
         base = self._fixed_users[uid]
         # Compose document with explicit key order
@@ -76,14 +74,14 @@ class UserDataGenerator:
             "avatar": base["avatar"],
             "geo": base["geo"],
             "role": base["role"],
-            "lastLoginAt": last_login_iso_date,
+            "lastLoginAt": last_login_dt,
             "name": base["name"],
             "devices": base["devices"],
             "resources": base["resources"],
-            "created_at": created_iso_date,
-            "updated_at": updated_iso_date,
+            "created_at": created_dt,
+            "updated_at": updated_dt,
             "level": self._user_levels[uid],
-            "updatedAt": updated_iso_date,
+            "updatedAt": updated_dt,
             "team": base["team"],
         }
         return document

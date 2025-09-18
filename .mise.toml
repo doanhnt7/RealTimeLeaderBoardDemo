@@ -20,3 +20,11 @@ run = "docker exec redis redis-benchmark -t zadd -n 10000000 -c 50 -d 16 -k 1 -r
 [tasks.start-producer]
 run = "docker compose -f docker/docker-compose.yml exec -it data-generator python _04_main.py start-producer"
 
+[tasks."flink:build"]
+description = "Build Flink JAR package"
+run = "cd flink-jobs && mvn clean package"
+
+
+[tasks."flink:run"]
+description = "Run building leaderboard job"
+run = "docker compose -f docker/docker-compose.yml exec -it jobmanager flink run -c jobs.LeaderBoardBuilder /opt/flink/jobs/flink-jobs-1.0-SNAPSHOT.jar"

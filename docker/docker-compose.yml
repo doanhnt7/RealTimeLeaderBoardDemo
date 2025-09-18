@@ -118,6 +118,9 @@ services:
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
     command: jobmanager
+    volumes:
+      - ../flink-jobs/target:/opt/flink/jobs
+      - ../flink-jobs/src/main/resources/config.yaml:/opt/flink/conf/config.yaml
     restart: unless-stopped
     depends_on:
       - kafka

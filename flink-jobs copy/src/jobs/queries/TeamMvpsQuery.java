@@ -7,9 +7,9 @@ import static org.apache.flink.table.api.Expressions.*;
 
 public class TeamMvpsQuery {
     
-    public static Table createTeamMvpsTable(TableEnvironment tableEnv, Table userScores) {
+    public static Table createTeamMvpsTable(TableEnvironment tableEnv, Table Users) {
         // Team MVPs Query using Table API
-        Table playerTeamAgg = userScores
+        Table playerTeamAgg = Users
             .groupBy($("user_id"), $("team_id"))
             .select(
                 $("user_id"),
@@ -17,7 +17,7 @@ public class TeamMvpsQuery {
                 $("score").sum().as("player_total")
             );
 
-        Table teamTotalAgg = userScores
+        Table teamTotalAgg = Users
             .groupBy($("team_id"))
             .select(
                 $("team_id"),

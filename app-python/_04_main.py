@@ -72,8 +72,8 @@ def create_parser():
     # Start producer command
     producer_parser = subparsers.add_parser('start-producer', help='Start realtime user producer')
     producer_parser.add_argument('--rate', type=int, help='Events per second')
-    producer_parser.add_argument('--num-user', type=int, default=1, help='Number of unique users to pre-initialize')
-    producer_parser.add_argument('--num-app', type=int, default=1, help='Number of apps to randomly assign per user')
+    producer_parser.add_argument('--num-user', type=int, help='Number of unique users to pre-initialize')
+    producer_parser.add_argument('--num-app', type=int, help='Number of apps to randomly assign per user')
     # Mongo connection overrides
     producer_parser.add_argument('--mongo-uri', type=str, help='MongoDB connection string')
     producer_parser.add_argument('--mongo-db', type=str, help='MongoDB database name')
@@ -106,8 +106,8 @@ async def main():
                 config.MONGO_COLLECTION = args.mongo_collection
             await start_producer(
                 rate=(args.rate or config.SLEEP_RATE),
-                num_user=args.num_user,
-                num_app=args.num_app,
+                num_user=args.num_user or config.NUM_USER,
+                num_app=args.num_app or config.NUM_APP,
             )
         else:
             parser.print_help()
