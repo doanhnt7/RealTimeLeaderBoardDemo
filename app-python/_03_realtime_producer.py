@@ -46,6 +46,19 @@ class RealtimeDataProducer:
             # Ensure useful indexes for Debezium and query patterns
             self.collection.create_index("uid")
             self.collection.create_index("updated_at")
+            # Enable pre/post images so Debezium can emit `before` (MongoDB >= 6.0)
+            try:
+                # Ensure collection exists before collMod (no-op if exists)
+                if self.mongo_collection not in db.list_collection_names():
+                    db.create_collection(self.mongo_collection)
+                db.command({
+                    "collMod": self.mongo_collection,
+                    "changeStreamPreAndPostImages": {"enabled": True}
+                })
+                logger.info("Enabled changeStream pre/post images on collection", collection=self.mongo_collection)
+            except Exception as e:
+                # Log but continue; app still functions without pre/post images
+                logger.warning("Could not enable pre/post images on collection", collection=self.mongo_collection, error=str(e))
         except Exception as e:
             logger.error("Failed to initialize MongoDB client", error=str(e))
             raise
@@ -53,7 +66,7 @@ class RealtimeDataProducer:
     async def _generate_and_send_user(self):
         try:
             user_doc = self.data_generator.generate_user_submission()
-            if not self.collection:
+            if self.collection is None:
                 raise RuntimeError("MongoDB collection is not initialized")
             # Use upsert on uid to simulate user updates over time
             uid = user_doc["uid"]
@@ -67,7 +80,7 @@ class RealtimeDataProducer:
         if self.is_running:
             logger.warning("Producer is already running")
             return
-        logger.info("Starting realtime user producer", rate=self.sleep_rate, topic=self.users_topic)
+        logger.info("Starting realtime user producer", rate=self.sleep_rate, collection=self.mongo_collection)
         self.is_running = True
         self.stats['start_time'] = datetime.now(timezone.utc)
         tasks = [asyncio.create_task(self._loop())]
@@ -102,7 +115,7 @@ class RealtimeDataProducer:
     def stop(self):
         logger.info("Stopping realtime user producer...")
         self.is_running = False
-        if self.client:
+        if self.client is not None:
             try:
                 self.client.close()
             except Exception:

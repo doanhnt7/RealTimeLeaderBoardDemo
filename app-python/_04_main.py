@@ -72,7 +72,7 @@ def create_parser():
     # Start producer command
     producer_parser = subparsers.add_parser('start-producer', help='Start realtime user producer')
     producer_parser.add_argument('--rate', type=int, help='Events per second')
-    producer_parser.add_argument('--num-user', type=int, default=100, help='Number of unique users to pre-initialize')
+    producer_parser.add_argument('--num-user', type=int, default=1, help='Number of unique users to pre-initialize')
     producer_parser.add_argument('--num-app', type=int, default=1, help='Number of apps to randomly assign per user')
     # Mongo connection overrides
     producer_parser.add_argument('--mongo-uri', type=str, help='MongoDB connection string')

@@ -3,19 +3,17 @@
   "config": {
     "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
     "tasks.max": "1",
-    "mongodb.hosts": "rs0/mongo:27017",
-    "mongodb.name": "mongo_cdc",
-    "mongodb.members.auto.discover": "false",
-    "topic.prefix": "mongo_cdc",
+    "mongodb.connection.string": "mongodb://mongo:27017/?replicaSet=rs0",
+    "topic.prefix": "task",
     "collection.include.list": "leaderboard.user_submissions",
     "mongodb.uuid.representation": "standard",
-    "capture.mode.name": "change_streams_update_full",
-    "transforms": "unwrap,routeToSingle",
-    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewDocumentState",
-    "transforms.unwrap.drop.tombstones": "true",
-    "transforms.unwrap.delete.handling.mode": "rewrite",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": false,
+    "mongodb.source.json.format": "canonical",
+    "capture.mode": "change_streams_update_full_with_pre_image",
+    "transforms": "routeToSingle",
     "transforms.routeToSingle.type": "org.apache.kafka.connect.transforms.RegexRouter",
-    "transforms.routeToSingle.regex": ".*",
+    "transforms.routeToSingle.regex": "task.leaderboard.user_submissions",
     "transforms.routeToSingle.replacement": "leaderboard_update"
   }
 }

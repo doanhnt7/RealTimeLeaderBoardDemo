@@ -28,7 +28,6 @@ class UserDataGenerator:
         for uid in self.user_uids:
             fb_inst_id = self.fake.pystr(min_chars=22, max_chars=22)
             self._fixed_users[uid] = {
-                "_id": str(uuid.uuid4()),
                 "uid": uid,
                 "geo": self.fake.random_element(elements=("US", "UK", "DE", "FR", "JP", "VN")),
                 "avatar": str(self.fake.random_int(min=1, max=20)),
@@ -45,11 +44,12 @@ class UserDataGenerator:
                 "email": None,
                 "authProvider": None,
                 "resources": [],
+                "team": self.fake.random_int(min=1, max=10)
             }
 
-    def generate_user_submission(self, now: Optional[datetime] = None) -> Dict[str, Any]:
-        if now is None:
-            now = datetime.now(timezone.utc)
+    def generate_user_submission(self) -> Dict[str, Any]:
+    
+        now = datetime.now(timezone.utc)
         # Select a user uid from the pre-generated list
         uid = random.choice(self.user_uids)
         # Dynamic fields only below (fixed are loaded from cache)
@@ -69,7 +69,6 @@ class UserDataGenerator:
         base = self._fixed_users[uid]
         # Compose document with explicit key order
         document = {
-            "_id": base["_id"],
             "uid": base["uid"],
             "email": base["email"],
             "authProvider": base["authProvider"],
@@ -85,7 +84,7 @@ class UserDataGenerator:
             "updated_at": updated_iso_date,
             "level": self._user_levels[uid],
             "updatedAt": updated_iso_date,
-            "team": self.fake.random_int(min=1, max=10),
+            "team": base["team"],
         }
         return document
 

@@ -5,8 +5,6 @@ services:
     command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "27017:27017"
-    volumes:
-      - ./mongo-data:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -162,6 +160,17 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     restart: unless-stopped
 
+  connect-init:
+    image: curlimages/curl:8.6.0
+    container_name: connect-init
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+    volumes:
+      - ./debezium-mongo-connector.json:/tmp/connector.json:ro
+    entrypoint: ["sh", "-c", "set -e; echo 'Waiting for Kafka Connect...'; until curl -fs http://kafka-connect:8083/connectors > /dev/null; do sleep 2; done; echo 'Registering Debezium connector...'; (curl -fs -X POST http://kafka-connect:8083/connectors -H 'Content-Type: application/json' --data @/tmp/connector.json || curl -fs -X PUT http://kafka-connect:8083/connectors/mongo-leaderboard-connector/config -H 'Content-Type: application/json' --data @/tmp/connector.json); echo 'Connector ensured.'"]
+    restart: "no"
+
   data-generator:
     build:
       context: ../app-python
@@ -190,17 +199,17 @@ services:
       retries: 3
       start_period: 30s
 
-  zeppelin:
-    image: apache/zeppelin:0.11.0
-    container_name: zeppelin
-    ports:
-      - "8082:8080"
-    environment:
-      ZEPPELIN_ADDR: 0.0.0.0
-    # volumes:
-    #   - ./zeppelin/notebook:/zeppelin/notebook
-    #   - ./zeppelin/conf:/zeppelin/conf
-    restart: unless-stopped
+  # zeppelin:
+  #   image: apache/zeppelin:0.11.0
+  #   container_name: zeppelin
+  #   ports:
+  #     - "8082:8080"
+  #   environment:
+  #     ZEPPELIN_ADDR: 0.0.0.0
+  #   # volumes:
+  #   #   - ./zeppelin/notebook:/zeppelin/notebook
+  #   #   - ./zeppelin/conf:/zeppelin/conf
+  #   restart: unless-stopped
 
 # volumes:
 #   # Named volumes not required; using project-local bind mounts above
