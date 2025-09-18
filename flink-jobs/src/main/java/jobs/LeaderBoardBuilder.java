@@ -36,14 +36,14 @@ public class LeaderBoardBuilder {
 						.withTimestampAssigner((SerializableTimestampAssigner<User>) (e, ts) -> e.getEventTimeMillis()),
 				"users-source");
 
-		// Print each User's toString() to the console
-		events.map(user -> {
-			System.out.println(user.toString());
-			return user;
-		}).name("print-user-toString");
+		// // Print each User's toString() to the console
+		// events.map(user -> {
+		// 	System.out.println(user.toString());
+		// 	return user;
+		// }).name("print-user-toString");
 
-		// // Write each record to Redis user all-time ZSET: member=uid, score=level
-		// DataStream<User> eventsWithRedis = events.map(new RedisUserAllTimeWriter("redis", 6379, null)).name("redis-user-alltime-writer");
+		// Write each record to Redis user all-time ZSET: member=uid, score=level
+		DataStream<User> eventsWithRedis = events.map(new RedisBaseWriter("redis", 6379, null)).name("redis-base-writer");
 
 		// KeyedStream<User, String> byTeam = eventsWithRedis.keyBy(User::getTeamId);
 		// KeyedStream<User, String> byUser = eventsWithRedis.keyBy(User::getUserId);

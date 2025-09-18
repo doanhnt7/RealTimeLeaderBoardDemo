@@ -27,9 +27,9 @@ services:
     container_name: redis
     ports:
       - "6379:6379"
-    volumes:
-      - ./redis-data:/data
-    command: ["redis-server", "--appendonly", "yes"]
+    # volumes:
+    #   - ./redis-data:/data
+    # command: ["redis-server", "--appendonly", "yes"]
     restart: unless-stopped
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -184,6 +184,8 @@ services:
         condition: service_healthy
       mongo-init-replica:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: leaderboard

@@ -13,3 +13,4 @@ flake8==6.1.0
 confluent-kafka
 lz4
 pymongo
+redis==5.0.1

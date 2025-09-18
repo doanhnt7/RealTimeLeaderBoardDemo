@@ -6,6 +6,10 @@ import random
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, List
+import json
+import structlog
+import redis
+from _00_config import config
 from faker import Faker
 
 
@@ -46,6 +50,38 @@ class UserDataGenerator:
                 "resources": [],
                 "team": self.fake.random_int(min=1, max=10)
             }
+
+        # Initialize Redis client for caching user profiles
+        self._logger = structlog.get_logger()
+        try:
+            self._redis = redis.Redis(
+                host=config.REDIS_HOST,
+                port=config.REDIS_PORT,
+                db=config.REDIS_DB,
+                password=(config.REDIS_PASSWORD or None),
+                socket_timeout=1.5,
+                socket_connect_timeout=1.5,
+                decode_responses=True,
+            )
+            # Warm user profile cache as hashes per user
+            pipe = self._redis.pipeline(transaction=False)
+            for uid in self.user_uids:
+                base = self._fixed_users[uid]
+                key = f"{config.REDIS_USER_PROFILE_PREFIX}{uid}"
+                # Store minimal fields useful for enrichment
+                pipe.hset(key, mapping={
+                    "uid": base["uid"],
+                    "name": base["name"],
+                    "geo": base["geo"],
+                    "team": str(base["team"]),
+                    "avatar": base["avatar"],
+                })
+            pipe.execute()
+            self._logger.info("Cached user profiles to Redis", count=len(self.user_uids), host=config.REDIS_HOST, port=config.REDIS_PORT)
+        except Exception as e:
+            # Non-fatal: generator can still run without cache
+            self._redis = None
+            self._logger.warning("Failed to warm Redis user profile cache", error=str(e))
 
     def generate_user_submission(self) -> Dict[str, Any]:
     

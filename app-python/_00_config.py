@@ -18,6 +18,13 @@ class Config:
     NUM_USER = 100
     NUM_APP = 1
     
+    # Redis cache settings (for user profile cache)
+    REDIS_HOST = 'redis'
+    REDIS_PORT = 6379
+    REDIS_DB = 0
+    REDIS_PASSWORD = ''
+    REDIS_USER_PROFILE_PREFIX = 'user:profile:'
+    
     # Logging
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 

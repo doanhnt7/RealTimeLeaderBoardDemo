@@ -1,0 +1,155 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "uid": "redis", "type": "redis-datasource" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "countRows": false, "fields": "" } },
+      "targets": [
+        {
+          "datasource": { "type": "redis-datasource", "uid": "redis" },
+          "refId": "A",
+          "type": "command",
+          "query": "",
+          "command": "zrange",
+          "keyName": "leaderboard_weekly_highest_level:2025:38",
+          "zrangeQuery": "REV WITHSCORES",
+          "min": "0",
+          "max": "19"
+        }
+      ],
+      "title": "Weekly Highest Level (Top 20)",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {}
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": { "uid": "redis", "type": "redis-datasource" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 0 },
+      "id": 2,
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "countRows": false, "fields": "" } },
+      "targets": [
+        {
+          "datasource": { "type": "redis-datasource", "uid": "redis" },
+          "refId": "A",
+          "type": "command",
+          "query": "",
+          "command": "zrange",
+          "keyName": "leaderboard_weekly_levels_gained:2025:38",
+          "zrangeQuery": "REV WITHSCORES",
+          "min": "0",
+          "max": "19"
+        }
+      ],
+      "title": "Weekly Levels Gained (Top 20)",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {}
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": { "uid": "redis", "type": "redis-datasource" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 0 },
+      "id": 3,
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "countRows": false, "fields": "" } },
+      "targets": [
+        {
+          "datasource": { "type": "redis-datasource", "uid": "redis" },
+          "refId": "A",
+          "type": "command",
+          "query": "",
+          "command": "zrange",
+          "keyName": "leaderboard_user_alltime",
+          "zrangeQuery": "REV WITHSCORES",
+          "min": "0",
+          "max": "19"
+        }
+      ],
+      "title": "All-time Leaderboard (Top 20)",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {}
+        }
+      ],
+      "type": "table"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 41,
+  "tags": [
+    "redis",
+    "leaderboard"
+  ],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Redis Leaderboards",
+  "uid": "redis-leaderboards"
+}
+
+

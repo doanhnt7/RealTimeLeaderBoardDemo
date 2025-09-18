@@ -5,9 +5,9 @@ datasources:
     uid: redis
     access: proxy
     isDefault: false
+    url: redis://redis:6379
     jsonData:
       client: standalone
-      addr: redis:6379
       poolSize: 5
       timeout: 10
     secureJsonData:
