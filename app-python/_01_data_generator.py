@@ -65,9 +65,9 @@ class UserDataGenerator:
             )
             # Warm user profile cache as hashes per user
             pipe = self._redis.pipeline(transaction=False)
+            key = "user_profiles"
             for uid in self.user_uids:
                 base = self._fixed_users[uid]
-                key = f"{config.REDIS_USER_PROFILE_PREFIX}{uid}"
                 # Store minimal fields useful for enrichment
                 pipe.hset(key, mapping={
                     "uid": base["uid"],

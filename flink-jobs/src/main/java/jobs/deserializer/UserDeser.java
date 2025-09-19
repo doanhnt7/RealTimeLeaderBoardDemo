@@ -1,4 +1,4 @@
-package jobs.processors;
+package jobs.deserializer;
 
 import jobs.models.User;
 import org.apache.flink.api.common.typeinfo.TypeInformation;

@@ -24,11 +24,21 @@
       "datasource": { "uid": "redis", "type": "redis-datasource" },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null }
+              { "color": "green", "value": 0 }
             ]
           }
         },
@@ -36,25 +46,55 @@
       },
       "gridPos": { "h": 9, "w": 8, "x": 0, "y": 0 },
       "id": 1,
-      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "countRows": false, "fields": "" } },
+      "options": { 
+        "cellHeight": "sm", 
+        "footer": { 
+          "countRows": false, 
+          "fields": "", 
+          "reducer": ["sum"], 
+          "show": false 
+        }, 
+        "frameIndex": 0, 
+        "showHeader": true 
+      },
+      "pluginVersion": "12.1.1",
       "targets": [
         {
-          "datasource": { "type": "redis-datasource", "uid": "redis" },
-          "refId": "A",
-          "type": "command",
-          "query": "",
           "command": "zrange",
+          "datasource": { "type": "redis-datasource", "uid": "redis" },
+          "hide": false,
           "keyName": "leaderboard_weekly_highest_level:2025:38",
-          "zrangeQuery": "REV WITHSCORES",
+          "max": "-1",
           "min": "0",
-          "max": "19"
+          "query": "",
+          "refId": "A",
+          "streaming": false,
+          "type": "command",
+          "zrangeQuery": ""
         }
       ],
       "title": "Weekly Highest Level (Top 20)",
       "transformations": [
         {
-          "id": "labelsToFields",
-          "options": {}
+          "id": "reduce",
+          "options": {
+            "labelsToFields": true,
+            "reducers": [
+              "sum"
+            ]
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Total"
+              }
+            ]
+          }
         }
       ],
       "type": "table"
@@ -63,11 +103,21 @@
       "datasource": { "uid": "redis", "type": "redis-datasource" },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null }
+              { "color": "green", "value": 0 }
             ]
           }
         },
@@ -75,25 +125,55 @@
       },
       "gridPos": { "h": 9, "w": 8, "x": 8, "y": 0 },
       "id": 2,
-      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "countRows": false, "fields": "" } },
+      "options": { 
+        "cellHeight": "sm", 
+        "footer": { 
+          "countRows": false, 
+          "fields": "", 
+          "reducer": ["sum"], 
+          "show": false 
+        }, 
+        "frameIndex": 0, 
+        "showHeader": true 
+      },
+      "pluginVersion": "12.1.1",
       "targets": [
         {
-          "datasource": { "type": "redis-datasource", "uid": "redis" },
-          "refId": "A",
-          "type": "command",
-          "query": "",
           "command": "zrange",
+          "datasource": { "type": "redis-datasource", "uid": "redis" },
+          "hide": false,
           "keyName": "leaderboard_weekly_levels_gained:2025:38",
-          "zrangeQuery": "REV WITHSCORES",
+          "max": "-1",
           "min": "0",
-          "max": "19"
+          "query": "",
+          "refId": "A",
+          "streaming": false,
+          "type": "command",
+          "zrangeQuery": ""
         }
       ],
       "title": "Weekly Levels Gained (Top 20)",
       "transformations": [
         {
-          "id": "labelsToFields",
-          "options": {}
+          "id": "reduce",
+          "options": {
+            "labelsToFields": true,
+            "reducers": [
+              "sum"
+            ]
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Total"
+              }
+            ]
+          }
         }
       ],
       "type": "table"
@@ -102,11 +182,21 @@
       "datasource": { "uid": "redis", "type": "redis-datasource" },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null }
+              { "color": "green", "value": 0 }
             ]
           }
         },
@@ -114,25 +204,55 @@
       },
       "gridPos": { "h": 9, "w": 8, "x": 16, "y": 0 },
       "id": 3,
-      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false, "reducer": ["sum"], "countRows": false, "fields": "" } },
+      "options": { 
+        "cellHeight": "sm", 
+        "footer": { 
+          "countRows": false, 
+          "fields": "", 
+          "reducer": ["sum"], 
+          "show": false 
+        }, 
+        "frameIndex": 0, 
+        "showHeader": true 
+      },
+      "pluginVersion": "12.1.1",
       "targets": [
         {
-          "datasource": { "type": "redis-datasource", "uid": "redis" },
-          "refId": "A",
-          "type": "command",
-          "query": "",
           "command": "zrange",
+          "datasource": { "type": "redis-datasource", "uid": "redis" },
+          "hide": false,
           "keyName": "leaderboard_user_alltime",
-          "zrangeQuery": "REV WITHSCORES",
+          "max": "-1",
           "min": "0",
-          "max": "19"
+          "query": "",
+          "refId": "A",
+          "streaming": false,
+          "type": "command",
+          "zrangeQuery": ""
         }
       ],
       "title": "All-time Leaderboard (Top 20)",
       "transformations": [
         {
-          "id": "labelsToFields",
-          "options": {}
+          "id": "reduce",
+          "options": {
+            "labelsToFields": true,
+            "reducers": [
+              "sum"
+            ]
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Total"
+              }
+            ]
+          }
         }
       ],
       "type": "table"

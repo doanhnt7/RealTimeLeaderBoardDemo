@@ -1,18 +1,16 @@
 package jobs;
 
+import jobs.deserializer.UserDeser;
 import jobs.models.*;
 import jobs.processors.*;
 import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
-import org.apache.flink.streaming.api.datastream.AllWindowedStream;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows;
-import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
+
 
 import java.time.Duration;
 
@@ -32,95 +30,48 @@ public class LeaderBoardBuilder {
 
 		DataStream<User> events = env.fromSource(
 				source,
-				WatermarkStrategy.<User>forBoundedOutOfOrderness(Duration.ofSeconds(5))
+				WatermarkStrategy.<User>forBoundedOutOfOrderness(Duration.ofSeconds(10))
 						.withTimestampAssigner((SerializableTimestampAssigner<User>) (e, ts) -> e.getEventTimeMillis()),
 				"users-source");
 
-		// // Print each User's toString() to the console
-		// events.map(user -> {
-		// 	System.out.println(user.toString());
-		// 	return user;
-		// }).name("print-user-toString");
 
 		// Write each record to Redis user all-time ZSET: member=uid, score=level
-		DataStream<User> eventsWithRedis = events.map(new RedisBaseWriter("redis", 6379, null)).name("redis-base-writer");
+		events.sinkTo(new BaseSink("redis", 6379)).name("base-redis-sink");
 
-		// KeyedStream<User, String> byTeam = eventsWithRedis.keyBy(User::getTeamId);
-		// KeyedStream<User, String> byUser = eventsWithRedis.keyBy(User::getUserId);
+		DataStream<TopNDelta> userScores = events
+			.map(u -> new Score(u.getUserId(), u.getLevel(), u.getEventTimeMillis()))
+			.global()
+			.process(new TopNScoresInLastXMinutesProcessor(10, 5))
+			.name("top-n-scores");
+		
+		userScores.sinkTo(new TopNSink("redis", 6379, "top_scores_5min"))
+			.name("redis-top-scores");
 
-		// DataStream<TeamTotal> teamTotals = byTeam.process(new RollingSumPerTeam()).name("team-totals");
-		// DataStream<PlayerTotal> playerTotals = byUser.process(new RollingSumPerUser()).name("player-totals");
 
-		// AllWindowedStream<TeamTotal, TimeWindow> teamTotalsWindow = teamTotals.windowAll(TumblingProcessingTimeWindows.of(Duration.ofSeconds(5)));
-		// DataStream<TopTeam> topTeams = teamTotalsWindow.apply(new TopTeamsWindow()).name("compute-top-teams");
 
-		// AllWindowedStream<PlayerTotal, TimeWindow> playerTotalsWindow = playerTotals.windowAll(TumblingProcessingTimeWindows.of(Duration.ofSeconds(5)));
-		// DataStream<TopPlayer> topPlayers = playerTotalsWindow.apply(new TopPlayersWindow()).name("compute-top-players");
+        // 1) Compute per-event gain
+        DataStream<Score> hotStats = events
+            .map(u -> new Score(u.getUserId(), Math.max(0, u.getLevel() - u.getPreviousLevel()), u.getEventTimeMillis()))
+            .keyBy(Score::getId)
+            .process(new HotStreakProcessFunction(10_000L, 60_000L))
+            .name("hot-streaks");
 
-		// DataStream<HotStat> hotStats = eventsWithRedis.keyBy(User::getUserId).process(new HotStreakProcessFunction(10_000L, 60_000L)).name("hot-stats");
-		// DataStream<HotStreaker> hotTop = hotStats.windowAll(TumblingProcessingTimeWindows.of(Duration.ofSeconds(5)))
-		// 		.apply(new HotStreakersWindow()).name("compute-hot-streakers");
+        // 2) Hot streak ratios (10s / 60s)
+      
 
-		// DataStream<PlayerTeamTotal> playerTeamTotals = eventsWithRedis
-		// 		.keyBy(e -> e.getTeamId() + "|" + e.getUserId())
-		// 		.process(new RollingSumPerUserTeam()).name("player-team-totals");
+        // 3) Top N hot streaks in last 5 minutes using TTL-based TopN processor
+        DataStream<TopNDelta> topHotDelta = hotStats
+            .global()
+            .process(new TopNScoresInLastXMinutesProcessor(10, 5))
+            .name("top-n-hotstreaks");
 
-		// DataStream<TeamMvpCandidate> mvpCandidates = playerTeamTotals
-		// 		.join(teamTotals)
-		// 		.where(PlayerTeamTotal::getTeamId)
-		// 		.equalTo(TeamTotal::getTeamId)
-		// 		.window(TumblingProcessingTimeWindows.of(Duration.ofSeconds(5)))
-		// 		.apply((left, right) -> {
-		// 			double ratio = right.getTotalScore() == 0 ? 0.0 : (left.getPlayerTotal() * 1.0) / right.getTotalScore();
-		// 			return new TeamMvpCandidate(left.getUserId(), left.getTeamName(), left.getPlayerTotal(), right.getTotalScore(), ratio);
-		// 		}).name("mvp-candidates");
+        topHotDelta.sinkTo(new TopNSink("redis", 6379, "top_hotstreaks_5min"))
+            .name("redis-top-hotstreaks");
 
-		// DataStream<TeamMvp> teamMvps = mvpCandidates
-		// 		.windowAll(TumblingProcessingTimeWindows.of(Duration.ofSeconds(5)))
-		// 		.apply(new TeamMvpWindow()).name("team-mvps");
+		KeyedStream<User, String> byTeam = events.keyBy(User::getTeamId);
+		KeyedStream<User, String> byUser = events.keyBy(User::getUserId);
 
-		// KafkaSink<String> topTeamsSink = KafkaSink.<String>builder()
-		// 		.setBootstrapServers("kafka:29092")
-		// 		.setRecordSerializer(org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema.builder()
-		// 				.setTopic("top-teams")
-		// 				.setValueSerializationSchema(new org.apache.flink.api.common.serialization.SimpleStringSchema())
-		// 				.build())
-		// 		.setDeliveryGuarantee(org.apache.flink.connector.base.DeliveryGuarantee.AT_LEAST_ONCE)
-		// 		.build();
-
-		// KafkaSink<String> topPlayersSink = KafkaSink.<String>builder()
-		// 		.setBootstrapServers("kafka:29092")
-		// 		.setRecordSerializer(org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema.builder()
-		// 				.setTopic("top-players")
-		// 				.setValueSerializationSchema(new org.apache.flink.api.common.serialization.SimpleStringSchema())
-		// 				.build())
-		// 		.setDeliveryGuarantee(org.apache.flink.connector.base.DeliveryGuarantee.AT_LEAST_ONCE)
-		// 		.build();
-
-		// KafkaSink<String> hotStreakersSink = KafkaSink.<String>builder()
-		// 		.setBootstrapServers("kafka:29092")
-		// 		.setRecordSerializer(org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema.builder()
-		// 				.setTopic("hot-streakers")
-		// 				.setValueSerializationSchema(new org.apache.flink.api.common.serialization.SimpleStringSchema())
-		// 				.build())
-		// 		.setDeliveryGuarantee(org.apache.flink.connector.base.DeliveryGuarantee.AT_LEAST_ONCE)
-		// 		.build();
-
-		// KafkaSink<String> teamMvpsSink = KafkaSink.<String>builder()
-		// 		.setBootstrapServers("kafka:29092")
-		// 		.setRecordSerializer(org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema.builder()
-		// 				.setTopic("team-mvps")
-		// 				.setValueSerializationSchema(new org.apache.flink.api.common.serialization.SimpleStringSchema())
-		// 				.build())
-		// 		.setDeliveryGuarantee(org.apache.flink.connector.base.DeliveryGuarantee.AT_LEAST_ONCE)
-		// 		.build();
-
-		// topTeams.map(TopTeam::toJson).sinkTo(topTeamsSink).name("sink-top-teams");
-		// topPlayers.map(TopPlayer::toJson).sinkTo(topPlayersSink).name("sink-top-players");
-		// hotTop.map(HotStreaker::toJson).sinkTo(hotStreakersSink).name("sink-hot-streakers");
-		// teamMvps.map(TeamMvp::toJson).sinkTo(teamMvpsSink).name("sink-team-mvps");
-
-        // Redis ZSET writes are done via the map side-effect above
+		
 
 		env.execute("LeaderBoard DataStream Job");
 	}
