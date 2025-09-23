@@ -209,17 +209,17 @@ services:
       retries: 3
       start_period: 30s
 
-  # zeppelin:
-  #   image: apache/zeppelin:0.11.0
-  #   container_name: zeppelin
-  #   ports:
-  #     - "8082:8080"
-  #   environment:
-  #     ZEPPELIN_ADDR: 0.0.0.0
-  #   # volumes:
-  #   #   - ./zeppelin/notebook:/zeppelin/notebook
-  #   #   - ./zeppelin/conf:/zeppelin/conf
-  #   restart: unless-stopped
+  zeppelin:
+    image: apache/zeppelin:0.11.0
+    container_name: zeppelin
+    ports:
+      - "8082:8080"
+    environment:
+      ZEPPELIN_ADDR: 0.0.0.0
+    # volumes:
+    #   - ./zeppelin/notebook:/zeppelin/notebook
+    #   - ./zeppelin/conf:/zeppelin/conf
+    restart: unless-stopped
 
 # volumes:
 #   # Named volumes not required; using project-local bind mounts above
