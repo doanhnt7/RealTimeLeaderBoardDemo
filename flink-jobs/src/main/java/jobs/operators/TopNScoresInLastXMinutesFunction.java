@@ -1,4 +1,4 @@
-package jobs.processors;
+package jobs.operators;
 
 import jobs.models.Score;
 import org.apache.flink.api.common.state.ValueState;
@@ -6,15 +6,15 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.functions.OpenContext;
-import org.apache.flink.streaming.api.functions.ProcessFunction;
 import jobs.models.TopNDelta;
 import org.apache.flink.util.Collector;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 
-public class TopNScoresInLastXMinutesProcessor extends ProcessFunction< Score, TopNDelta> {
+public class TopNScoresInLastXMinutesFunction extends KeyedProcessFunction<String, Score, TopNDelta> {
     
     private final int topN;
     private final long ttlMinutes;
@@ -24,7 +24,7 @@ public class TopNScoresInLastXMinutesProcessor extends ProcessFunction< Score, T
     // Keep previous Top-N snapshot for delta updates to Redis
     private transient ValueState<Map<String, Double>> previousTopN;
     
-    public TopNScoresInLastXMinutesProcessor(int topN, long ttlMinutes) {
+    public TopNScoresInLastXMinutesFunction(int topN, long ttlMinutes) {
         this.topN = topN;
         this.ttlMinutes = ttlMinutes;
     }

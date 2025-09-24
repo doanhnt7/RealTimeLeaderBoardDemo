@@ -2,7 +2,8 @@ package jobs;
 
 import jobs.deserializer.UserDeser;
 import jobs.models.*;
-import jobs.processors.*;
+import jobs.operators.*;
+
 import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.connector.kafka.source.KafkaSource;
@@ -30,7 +31,7 @@ public class LeaderBoardBuilder {
 
 		DataStream<User> events = env.fromSource(
 				source,
-				WatermarkStrategy.<User>forBoundedOutOfOrderness(Duration.ofSeconds(10))
+				WatermarkStrategy.<User>forBoundedOutOfOrderness(Duration.ofSeconds(1))
 						.withTimestampAssigner((SerializableTimestampAssigner<User>) (e, ts) -> e.getEventTimeMillis()),
 				"users-source");
 
@@ -40,9 +41,9 @@ public class LeaderBoardBuilder {
 
 		DataStream<TopNDelta> userScores = events
 			.map(u -> new Score(u.getUserId(), u.getLevel(), u.getEventTimeMillis()))
-			.global()
-			.process(new TopNScoresInLastXMinutesProcessor(10, 5))
-			.name("top-n-scores");
+			.keyBy(s -> "")
+			.process(new TopNScoresInLastXMinutesFunction(10, 5))
+			.name("top-n-scores-in-last-x-minutes");
 		
 		userScores.sinkTo(new TopNSink("redis", 6379, "top_scores_5min"))
 			.name("redis-top-scores");
@@ -62,7 +63,7 @@ public class LeaderBoardBuilder {
         // 3) Top N hot streaks in last 5 minutes using TTL-based TopN processor
         DataStream<TopNDelta> topHotDelta = hotStats
             .global()
-            .process(new TopNScoresInLastXMinutesProcessor(10, 5))
+            .process(new TopNScoresInLastXMinutesFunction(10, 5))
             .name("top-n-hotstreaks");
 
         topHotDelta.sinkTo(new TopNSink("redis", 6379, "top_hotstreaks_5min"))
