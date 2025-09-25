@@ -46,7 +46,10 @@ public class BaseSink implements Sink<User> {
                 if (uid != null) {
                     jedis.zadd("leaderboard_user_alltime", (double) level, uid);
 
-                    OffsetDateTime ts = value.getUpdatedAt();
+                    OffsetDateTime ts = OffsetDateTime.ofInstant(
+                        java.time.Instant.ofEpochMilli(value.getUpdatedAt()),
+                        java.time.ZoneOffset.UTC
+                    );
                     WeekFields wf = WeekFields.of(Locale.JAPANESE);
                     int weekNumber = ts.get(wf.weekOfWeekBasedYear());
                     int year = ts.getYear();
