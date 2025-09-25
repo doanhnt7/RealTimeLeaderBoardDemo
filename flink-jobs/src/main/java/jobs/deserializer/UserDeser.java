@@ -64,9 +64,11 @@ public class UserDeser implements KafkaRecordDeserializationSchema<User> {
             if (after.has("level")) u.setLevel(after.get("level").isNull() ? 0 : after.get("level").asInt());
             if (after.has("team")) u.setTeam(after.get("team").isNull() ? 0 : after.get("team").asInt());
 
-            // previousLevel from BEFORE.level if available
+            // previousLevel from BEFORE.level if available, else set to 0 if before is null
             if (before != null && before.has("level") && !before.get("level").isNull()) {
                 u.setPreviousLevel(before.get("level").asInt());
+            } else {
+                u.setPreviousLevel(0);
             }
 
             if (u.getUid() != null) out.collect(u);
@@ -80,38 +82,43 @@ public class UserDeser implements KafkaRecordDeserializationSchema<User> {
 		return TypeInformation.of(User.class);
 	}
 
-    private OffsetDateTime parseDate(JsonNode node) {
+    private Long parseDate(JsonNode node) {
         if (node == null || node.isNull()) return null;
         try {
             // Mongo extended JSON: { "$date": NUMBER | STRING }
             if (node.isObject() && node.has("$date")) {
                 JsonNode d = node.get("$date");
                 if (d.isNumber()) {
-                    long ms = d.asLong();
-                    return OffsetDateTime.ofInstant(java.time.Instant.ofEpochMilli(ms), java.time.ZoneOffset.UTC);
+                    return d.asLong();
                 }
                 if (d.isTextual()) {
                     String s = d.asText();
-                    // Try instant first, then OffsetDateTime
                     try {
-                        return OffsetDateTime.ofInstant(java.time.Instant.parse(s), java.time.ZoneOffset.UTC);
+                        // Try parsing as ISO instant
+                        return java.time.Instant.parse(s).toEpochMilli();
                     } catch (Exception ignored) {
-                        return OffsetDateTime.parse(s);
+                        try {
+                            // Try parsing as OffsetDateTime
+                            return java.time.OffsetDateTime.parse(s).toInstant().toEpochMilli();
+                        } catch (Exception ignored2) {
+                        }
                     }
                 }
             }
             // Plain number millis
             if (node.isNumber()) {
-                long ms = node.asLong();
-                return OffsetDateTime.ofInstant(java.time.Instant.ofEpochMilli(ms), java.time.ZoneOffset.UTC);
+                return node.asLong();
             }
             // Plain ISO text
             if (node.isTextual()) {
                 String s = node.asText();
                 try {
-                    return OffsetDateTime.parse(s);
+                    return java.time.OffsetDateTime.parse(s).toInstant().toEpochMilli();
                 } catch (Exception ignored) {
-                    return OffsetDateTime.ofInstant(java.time.Instant.parse(s), java.time.ZoneOffset.UTC);
+                    try {
+                        return java.time.Instant.parse(s).toEpochMilli();
+                    } catch (Exception ignored2) {
+                    }
                 }
             }
         } catch (Exception ignored) {

@@ -1,4 +1,4 @@
-package jobs.processors;
+package jobs.operators;
 
 import jobs.models.TopNDelta;
 import org.apache.flink.api.connector.sink2.Sink;

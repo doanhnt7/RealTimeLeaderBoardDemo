@@ -1,4 +1,4 @@
-package jobs.processors;
+package jobs.operators;
 
 import jobs.models.User;
 import org.apache.flink.api.connector.sink2.Sink;
@@ -47,7 +47,7 @@ public class BaseSink implements Sink<User> {
                     jedis.zadd("leaderboard_user_alltime", (double) level, uid);
 
                     OffsetDateTime ts = value.getUpdatedAt();
-                    WeekFields wf = WeekFields.of(Locale.getDefault());
+                    WeekFields wf = WeekFields.of(Locale.JAPANESE);
                     int weekNumber = ts.get(wf.weekOfWeekBasedYear());
                     int year = ts.getYear();
                     String weeklyHighestLevelKey = "leaderboard_weekly_highest_level:" + year + ":" + weekNumber;

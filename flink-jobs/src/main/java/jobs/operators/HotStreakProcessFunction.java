@@ -1,4 +1,4 @@
-package jobs.processors;
+package jobs.operators;
 
 import jobs.models.Score;
 import org.apache.flink.api.java.tuple.Tuple2;

@@ -1,6 +1,5 @@
 package jobs.models;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 
 public class User {
@@ -13,14 +12,14 @@ public class User {
     private String avatar;
     private String geo;
     private String role;
-    private OffsetDateTime lastLoginAt;
+    private long lastLoginAt;
     private String name;
     private List<Device> devices;
     private List<Object> resources;
-    private OffsetDateTime created_at;
-    private OffsetDateTime updated_at;
+    private long created_at;
+    private long updated_at;
     private int level;
-    private OffsetDateTime updatedAt;
+    private long updatedAt;
     private int team;
     private int previousLevel;
 
@@ -64,22 +63,22 @@ public class User {
     public void setGeo(String geo) { this.geo = geo; }
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }
-    public OffsetDateTime getLastLoginAt() { return lastLoginAt; }
-    public void setLastLoginAt(OffsetDateTime lastLoginAt) { this.lastLoginAt = lastLoginAt; }
+    public long getLastLoginAt() { return lastLoginAt; }
+    public void setLastLoginAt(long lastLoginAt) { this.lastLoginAt = lastLoginAt; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     public List<Device> getDevices() { return devices; }
     public void setDevices(List<Device> devices) { this.devices = devices; }
     public List<Object> getResources() { return resources; }
     public void setResources(List<Object> resources) { this.resources = resources; }
-    public OffsetDateTime getCreated_at() { return created_at; }
-    public void setCreated_at(OffsetDateTime created_at) { this.created_at = created_at; }
-    public OffsetDateTime getUpdated_at() { return updated_at; }
-    public void setUpdated_at(OffsetDateTime updated_at) { this.updated_at = updated_at; }
+    public long getCreated_at() { return created_at; }
+    public void setCreated_at(long created_at) { this.created_at = created_at; }
+    public long getUpdated_at() { return updated_at; }
+    public void setUpdated_at(long updated_at) { this.updated_at = updated_at; }
     public int getLevel() { return level; }
     public void setLevel(int level) { this.level = level; }
-    public OffsetDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public long getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(long updatedAt) { this.updatedAt = updatedAt; }
     public int getTeam() { return team; }
     public void setTeam(int team) { this.team = team; }
 
@@ -90,11 +89,6 @@ public class User {
     public String getTeamName() { return String.valueOf(team); }
     public int getScore() { return level; }
 
-    // Event time derived from updatedAt or updated_at
-    public long getEventTimeMillis() {
-        OffsetDateTime ts = updated_at;
-        return ts.toInstant().toEpochMilli();
-    }
     public int getPreviousLevel() {
         return previousLevel;
     }
