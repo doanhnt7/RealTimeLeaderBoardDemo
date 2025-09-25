@@ -25,8 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.HashSet;
-import java.util.Set;
 
 /**
  * A retractable TopN function similar to Flink's table runtime version but adapted for Score objects.
@@ -61,6 +59,15 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     
     // Comparator for scores (descending order - higher scores first)
     private static final Comparator<Double> SCORE_COMPARATOR = (s1, s2) -> Double.compare(s2, s1);
+    
+    // Helper methods for rank checking
+    private boolean isInRankEnd(long rank) {
+        return rank <= topN;
+    }
+    
+    private boolean isInRankRange(long rank) {
+        return rank >= 1 && rank <= topN;
+    }
     
     public RetractableTopNFunction(int topN, long ttlMinutes) {
         this.topN = topN;
@@ -111,198 +118,195 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             currentTreeMap = new TreeMap<>(SCORE_COMPARATOR);
         }
 
-        // Build membership sets before mutation (only ids, no rank sensitivity)
-        Set<String> beforeTopNIds = buildTopNIdSet(currentTreeMap);
-
-        // Retract using previousScore carried by upstream if present
-        Double prev = input.getPreviousScore();
-        if (prev != null) {
-            removeUserFromBucket(input.getId(), prev, currentTreeMap);
+        // Process retraction first if previousScore exists
+        if (input.getPreviousScore() != 0.0) {
+            Double prevSortKey = input.getPreviousScore();
+            
+            // Find the actual previous record by userId in the previousScore bucket
+            Score actualPrevRecord = findAndRemoveUserFromBucket(input.getId(), prevSortKey, currentTreeMap);
+            
+            // Emit retraction records without row number using the actual previous record
+            if (actualPrevRecord != null) {
+                retractRecordWithoutRowNumber(currentTreeMap, prevSortKey, actualPrevRecord, out);
+            }
         }
 
-        // Accumulate new score
-        addScore(input, currentTreeMap);
+        // Process accumulation for current score
+        Double sortKey = input.getScore();
+        
+        // Update sortedMap for accumulation
+        if (currentTreeMap.containsKey(sortKey)) {
+            currentTreeMap.put(sortKey, currentTreeMap.get(sortKey) + 1);
+        } else {
+            currentTreeMap.put(sortKey, 1L);
+        }
 
-        // Build membership sets after mutation
-        Set<String> afterTopNIds = buildTopNIdSet(currentTreeMap);
+        // Emit accumulation records without row number
+        emitRecordsWithoutRowNumber(currentTreeMap, sortKey, input, out);
+        
+        // Update dataState for accumulation
+        List<Score> inputs = dataState.get(sortKey);
+        if (inputs == null) {
+            inputs = new ArrayList<>();
+        }
+        inputs.add(input);
+        dataState.put(sortKey, inputs);
 
-        // Emit minimal changes without row number: set difference on membership
-        emitMembershipChanges(beforeTopNIds, afterTopNIds, out, currentTreeMap);
-
-        // Persist updated map
+        // Update the tree map state
         treeMap.update(currentTreeMap);
     }
     
     /**
-     * Find and remove previous score for a user, updating the sorted map accordingly
+     * Find user in specific score bucket and remove, return the actual record that was removed
      */
-    private Score findAndRemovePreviousScore(String userId, SortedMap<Double, Long> currentTreeMap) throws Exception {
-        // Search through all score buckets to find the user's previous score
-        for (Double scoreValue : dataState.keys()) {
-            List<Score> scoresAtThisValue = dataState.get(scoreValue);
-            if (scoresAtThisValue != null) {
-                Iterator<Score> iter = scoresAtThisValue.iterator();
-                while (iter.hasNext()) {
-                    Score score = iter.next();
-                    if (score.getId().equals(userId)) {
-                        // Found the user's previous score, remove it
-                        iter.remove();
-                        
-                        // Update tree map count
-                        Long count = currentTreeMap.get(scoreValue);
-                        if (count != null) {
-                            if (count <= 1) {
-                                currentTreeMap.remove(scoreValue);
-                            } else {
-                                currentTreeMap.put(scoreValue, count - 1);
-                            }
-                        }
-                        
-                        // Update data state
-                        if (scoresAtThisValue.isEmpty()) {
-                            dataState.remove(scoreValue);
-                        } else {
-                            dataState.put(scoreValue, scoresAtThisValue);
-                        }
-                        
-                        return score;
-                    }
-                }
-            }
-        }
-        return null; // User didn't have a previous score
-    }
-    
-    /**
-     * Add a new score, updating both data state and sorted map
-     */
-    private void addScore(Score input, SortedMap<Double, Long> currentTreeMap) throws Exception {
-        Double scoreValue = input.getScore();
-        
-        // Update tree map count
-        Long count = currentTreeMap.get(scoreValue);
-        currentTreeMap.put(scoreValue, (count == null) ? 1L : count + 1);
-        
-        // Update data state
+    private Score findAndRemoveUserFromBucket(String userId, Double scoreValue, SortedMap<Double, Long> currentTreeMap) throws Exception {
         List<Score> scoresAtThisValue = dataState.get(scoreValue);
-        if (scoresAtThisValue == null) {
-            scoresAtThisValue = new ArrayList<>();
-        }
-        scoresAtThisValue.add(input);
-        dataState.put(scoreValue, scoresAtThisValue);
-    }
-    
-    /**
-     * Emit change events by comparing previous and new top N lists
-     */
-    private void emitMembershipChanges(Set<String> beforeIds,
-                                       Set<String> afterIds,
-                                       Collector<ScoreChangeEvent> out,
-                                       SortedMap<Double, Long> currentTreeMap) throws Exception {
-        // Deletions: in before but not in after
-        for (String id : beforeIds) {
-            if (!afterIds.contains(id)) {
-                Score s = findScoreByIdInTopN(id, currentTreeMap);
-                // If not present anymore, we can emit with a minimal placeholder (id, score 0)
-                if (s == null) {
-                    s = new Score(id, 0.0, (Double) null, 0L);
-                }
-                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, s, -1));
-            }
-        }
-        // Insertions: in after but not in before
-        for (String id : afterIds) {
-            if (!beforeIds.contains(id)) {
-                Score s = findScoreByIdInTopN(id, currentTreeMap);
-                if (s != null) {
-                    out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, s, -1));
-                }
-            }
-        }
-    }
-    
-    /**
-     * Build top N list from the sorted map structure
-     */
-    private List<Score> buildTopNFromTreeMap(SortedMap<Double, Long> currentTreeMap) throws Exception {
-        List<Score> topNList = new ArrayList<>();
-        int currentRank = 0;
-        
-        for (Map.Entry<Double, Long> entry : currentTreeMap.entrySet()) {
-            if (currentRank >= topN) {
-                break;
-            }
-            
-            Double scoreValue = entry.getKey();
-            List<Score> scoresAtThisValue = dataState.get(scoreValue);
-            
-            if (scoresAtThisValue != null) {
-                // Sort by timestamp descending for tie-breaking
-                scoresAtThisValue.sort((s1, s2) -> 
-                    Long.compare(s2.getLastUpdateTime(), s1.getLastUpdateTime()));
-                
-                for (Score score : scoresAtThisValue) {
-                    if (currentRank >= topN) {
-                        break;
-                    }
-                    topNList.add(score);
-                    currentRank++;
-                }
-            }
-        }
-        
-        return topNList;
-    }
-
-    private Set<String> buildTopNIdSet(SortedMap<Double, Long> currentTreeMap) throws Exception {
-        List<Score> list = buildTopNFromTreeMap(currentTreeMap);
-        Set<String> ids = new HashSet<>();
-        for (Score s : list) ids.add(s.getId());
-        return ids;
-    }
-
-    private void removeUserFromBucket(String userId, Double prevScoreValue, SortedMap<Double, Long> currentTreeMap) throws Exception {
-        List<Score> scoresAtThisValue = dataState.get(prevScoreValue);
         if (scoresAtThisValue != null) {
             Iterator<Score> iter = scoresAtThisValue.iterator();
-            boolean removed = false;
             while (iter.hasNext()) {
-                Score sc = iter.next();
-                if (userId.equals(sc.getId())) {
+                Score score = iter.next();
+                if (score.getId().equals(userId)) {
+                    // Found the actual previous record, remove it
                     iter.remove();
-                    removed = true;
-                    break;
+                    
+                    // Update tree map count
+                    Long count = currentTreeMap.get(scoreValue);
+                    if (count != null) {
+                        if (count <= 1) {
+                            currentTreeMap.remove(scoreValue);
+                        } else {
+                            currentTreeMap.put(scoreValue, count - 1);
+                        }
+                    }
+                    
+                    // Update data state
+                    if (scoresAtThisValue.isEmpty()) {
+                        dataState.remove(scoreValue);
+                    } else {
+                        dataState.put(scoreValue, scoresAtThisValue);
+                    }
+                    
+                    return score; // Return the actual record with correct timestamp
                 }
             }
-            if (removed) {
-                Long count = currentTreeMap.get(prevScoreValue);
-                if (count != null) {
-                    if (count <= 1) currentTreeMap.remove(prevScoreValue);
-                    else currentTreeMap.put(prevScoreValue, count - 1);
+        }
+        return null; // User not found in this bucket
+    }
+    
+    /**
+     * Emit records without row number - adapted from Flink's emitRecordsWithoutRowNumber
+     */
+    private void emitRecordsWithoutRowNumber(
+            SortedMap<Double, Long> sortedMap,
+            Double sortKey,
+            Score inputRow,
+            Collector<ScoreChangeEvent> out) throws Exception {
+        
+        Iterator<Map.Entry<Double, Long>> iterator = sortedMap.entrySet().iterator();
+        long curRank = 0L;
+        boolean findsSortKey = false;
+        Score toCollect = null;
+        Score toDelete = null;
+        
+        while (iterator.hasNext() && isInRankEnd(curRank)) {
+            Map.Entry<Double, Long> entry = iterator.next();
+            Double key = entry.getKey();
+            
+            if (!findsSortKey && key.equals(sortKey)) {
+                curRank += entry.getValue();
+                if (isInRankRange(curRank)) {
+                    toCollect = inputRow;
                 }
-                if (scoresAtThisValue.isEmpty()) dataState.remove(prevScoreValue);
-                else dataState.put(prevScoreValue, scoresAtThisValue);
+                findsSortKey = true;
+            } else if (findsSortKey) {
+                List<Score> inputs = dataState.get(key);
+                if (inputs != null) {
+                    long count = entry.getValue();
+                    // gets the rank of last record with same sortKey
+                    long rankOfLastRecord = curRank + count;
+                    // deletes the record if there is a record recently downgrades to Top-(N+1)
+                    if (isInRankEnd(rankOfLastRecord)) {
+                        curRank = rankOfLastRecord;
+                    } else {
+                        int index = (int)(topN - curRank);
+                        if (index < inputs.size()) {
+                            toDelete = inputs.get(index);
+                        }
+                        break;
+                    }
+                }
+            } else {
+                curRank += entry.getValue();
+            }
+        }
+        
+        if (toDelete != null) {
+            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, toDelete, -1));
+        }
+        if (toCollect != null) {
+            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, inputRow, -1));
+        }
+    }
+    
+    /**
+     * Retract record without row number - adapted from Flink's retractRecordWithoutRowNumber
+     */
+    private void retractRecordWithoutRowNumber(
+            SortedMap<Double, Long> sortedMap,
+            Double sortKey,
+            Score inputRow,
+            Collector<ScoreChangeEvent> out) throws Exception {
+        
+        Iterator<Map.Entry<Double, Long>> iterator = sortedMap.entrySet().iterator();
+        long nextRank = 1L; // the next rank number, should be in the rank range
+        boolean findsSortKey = false;
+        
+        while (iterator.hasNext() && isInRankEnd(nextRank)) {
+            Map.Entry<Double, Long> entry = iterator.next();
+            Double key = entry.getKey();
+            
+            if (!findsSortKey && key.equals(sortKey)) {
+                List<Score> inputs = dataState.get(key);
+                if (inputs != null) {
+                    Iterator<Score> inputIter = inputs.iterator();
+                    while (inputIter.hasNext() && isInRankEnd(nextRank)) {
+                        Score prevRow = inputIter.next();
+                        if (!findsSortKey && prevRow.getId().equals(inputRow.getId())) {
+                            if (isInRankRange(nextRank)) {
+                                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, prevRow, -1));
+                            }
+                            findsSortKey = true;
+                        } else if (findsSortKey) {
+                            if (nextRank == topN) {
+                                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, prevRow, -1));
+                            }
+                        }
+                        nextRank += 1;
+                    }
+                }
+            } else if (findsSortKey) {
+                long count = entry.getValue();
+                // gets the rank of last record with same sortKey
+                long rankOfLastRecord = nextRank + count - 1;
+                if (rankOfLastRecord < topN) {
+                    nextRank = rankOfLastRecord + 1;
+                } else {
+                    // sends the record if there is a record recently upgrades to Top-N
+                    int index = (int)(topN - nextRank);
+                    List<Score> inputs = dataState.get(key);
+                    if (inputs != null && index < inputs.size()) {
+                        Score toAdd = inputs.get(index);
+                        out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, toAdd, -1));
+                        break;
+                    }
+                }
+            } else {
+                nextRank += entry.getValue();
             }
         }
     }
+    
 
-    private Score findScoreByIdInTopN(String userId, SortedMap<Double, Long> currentTreeMap) throws Exception {
-        int currentRank = 0;
-        for (Map.Entry<Double, Long> entry : currentTreeMap.entrySet()) {
-            if (currentRank >= topN) break;
-            Double scoreValue = entry.getKey();
-            List<Score> scoresAtThisValue = dataState.get(scoreValue);
-            if (scoresAtThisValue != null) {
-                scoresAtThisValue.sort((s1, s2) -> Long.compare(s2.getLastUpdateTime(), s1.getLastUpdateTime()));
-                for (Score s : scoresAtThisValue) {
-                    if (currentRank >= topN) break;
-                    if (userId.equals(s.getId())) return s;
-                    currentRank++;
-                }
-            }
-        }
-        return null;
-    }
     
     /**
      * Performs periodic cleanup of expired entries
