@@ -6,6 +6,8 @@ import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.state.StateTtlConfig;
+import java.time.Duration;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.metrics.Counter;
@@ -19,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+
 /**
  * Process Function for RANGE clause event-time bounded OVER window for Score aggregation.
  * 
@@ -51,18 +54,30 @@ public class TotalScoreTimeRangeBoundedPrecedingFunction
     // to this time stamp.
     private transient MapState<Long, List<Score>> inputState;
 
+    //the state which keeps the previous score
+    private transient ValueState<Double> previousScoreState;
+    private final long previousScoreTtlMinutes;
+
     // ------------------------------------------------------------------------
     // Metrics
     // ------------------------------------------------------------------------
     private static final String LATE_ELEMENTS_DROPPED_METRIC_NAME = "numLateRecordsDropped";
     private transient Counter numLateRecordsDropped;
 
-    public TotalScoreTimeRangeBoundedPrecedingFunction(int windowSizeMinutes) {
+    public TotalScoreTimeRangeBoundedPrecedingFunction(int windowSizeMinutes, long previousScoreTtlMinutes) {
         this.precedingOffset = windowSizeMinutes * 60 * 1000L; // convert minutes to milliseconds
+        this.previousScoreTtlMinutes = previousScoreTtlMinutes;
     }
 
     @Override
     public void open(OpenContext openContext) throws Exception {
+        // TTL config: 1 hour
+        StateTtlConfig ttlConfig = StateTtlConfig
+                .newBuilder(Duration.ofMinutes(previousScoreTtlMinutes))
+                .setUpdateType(StateTtlConfig.UpdateType.OnCreateAndWrite)
+                .setStateVisibility(StateTtlConfig.StateVisibility.ReturnExpiredIfNotCleanedUp)
+                .build();
+
         ValueStateDescriptor<Long> lastTriggeringTsDescriptor =
                 new ValueStateDescriptor<>("lastTriggeringTsState", Types.LONG);
         lastTriggeringTsState = getRuntimeContext().getState(lastTriggeringTsDescriptor);
@@ -81,6 +96,12 @@ public class TotalScoreTimeRangeBoundedPrecedingFunction
                 new MapStateDescriptor<>(
                         "inputState", Types.LONG, scoreListTypeInfo);
         inputState = getRuntimeContext().getMapState(inputStateDesc);
+
+        // NEW: previousScoreState with TTL
+        ValueStateDescriptor<Double> previousScoreDescriptor =
+                new ValueStateDescriptor<>("previousScoreState", Types.DOUBLE);
+        previousScoreDescriptor.enableTimeToLive(ttlConfig);
+        previousScoreState = getRuntimeContext().getState(previousScoreDescriptor);
 
         // metrics
         this.numLateRecordsDropped =
@@ -136,8 +157,6 @@ public class TotalScoreTimeRangeBoundedPrecedingFunction
         }
     }
 
-  
-
     @Override
     public void onTimer(
             long timestamp,
@@ -159,12 +178,14 @@ public class TotalScoreTimeRangeBoundedPrecedingFunction
 
         if (null != inputs) {
             Double totalScore = totalScoreState.value();
-            
+            Double previousTotalScore = previousScoreState.value();
             // initialize when first run or failover recovery per key
             if (null == totalScore) {
                 totalScore = 0.0;
             }
-            Double previousTotalScore = totalScore;
+            if (null == previousTotalScore) {
+                previousTotalScore = 0.0;
+            }
             // keep up timestamps of retract data
             List<Long> retractTsList = new ArrayList<>();
 
@@ -200,9 +221,14 @@ public class TotalScoreTimeRangeBoundedPrecedingFunction
             // update the total score state
             totalScoreState.update(totalScore);
 
+           
+
             // create output score with total accumulated score
             Score outputScore = new Score(ctx.getCurrentKey(), totalScore, previousTotalScore, timestamp);
             out.collect(outputScore);
+            
+             // update previousScoreState
+             previousScoreState.update(previousTotalScore);
 
             // remove the data that has been retracted
             for (Long retractTs : retractTsList) {

@@ -5,10 +5,8 @@ import jobs.models.ScoreChangeEvent;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
-import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
-import java.time.Duration;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeinfo.TypeHint;
@@ -17,7 +15,7 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import org.apache.flink.api.common.state.StateTtlConfig;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -43,6 +41,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     private static final Logger LOG = LoggerFactory.getLogger(RetractableTopNFunction.class);
     
     private final int topN;
+    private final long cleanupIntervalMs;
     private final long ttlMinutes;
     
     // State to store mapping from score value to list of users with that score
@@ -51,11 +50,11 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     // State to store sorted map of score -> count for efficient ranking  
     private transient ValueState<SortedMap<Double, Long>> treeMap;
     
-    // State to track last cleanup time
-    private transient ValueState<Long> lastCleanupTime;
+    // State to track if cleanup timer is registered
+    private transient ValueState<Boolean> timerRegistered;
     
     // TTL configuration
-    private static final long CLEANUP_INTERVAL_MS = 5 * 60 * 1000L; // 5 minutes
+   
     
     // Comparator for scores (descending order - higher scores first)
     private static final Comparator<Double> SCORE_COMPARATOR = (s1, s2) -> Double.compare(s2, s1);
@@ -65,44 +64,43 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         return rank <= topN;
     }
     
-    private boolean isInRankRange(long rank) {
-        return rank >= 1 && rank <= topN;
-    }
     
-    public RetractableTopNFunction(int topN, long ttlMinutes) {
+    public RetractableTopNFunction(int topN, long ttlMinutes, long cleanupIntervalMinutes) {
         this.topN = topN;
         this.ttlMinutes = ttlMinutes;
+        this.cleanupIntervalMs = cleanupIntervalMinutes * 60 * 1000L;
     }
     
     @Override
     public void open(OpenContext openContext) throws Exception {
         super.open(openContext);
-        
-        // Configure TTL
+
+        // TTL config for state
         StateTtlConfig ttlConfig = StateTtlConfig
-            .newBuilder(Duration.ofMinutes(ttlMinutes))
-            .setUpdateType(StateTtlConfig.UpdateType.OnCreateAndWrite)
-            .setStateVisibility(StateTtlConfig.StateVisibility.NeverReturnExpired)
-            .build();
-        
-        // Initialize data state (score -> list of Score objects with that score)
+                .newBuilder(java.time.Duration.ofMinutes(ttlMinutes))
+                .setUpdateType(StateTtlConfig.UpdateType.OnCreateAndWrite)
+                .setStateVisibility(StateTtlConfig.StateVisibility.ReturnExpiredIfNotCleanedUp)
+                .build();
+
+        // Initialize data state (score -> list of Score objects with that score) with TTL
         ListTypeInfo<Score> scoreListTypeInfo = new ListTypeInfo<>(Score.class);
         MapStateDescriptor<Double, List<Score>> dataDescriptor = 
             new MapStateDescriptor<>("data-state", Types.DOUBLE, scoreListTypeInfo);
         dataDescriptor.enableTimeToLive(ttlConfig);
         dataState = getRuntimeContext().getMapState(dataDescriptor);
-        
-        // Initialize sorted map state (score -> count)
+
+        // Initialize sorted map state (score -> count) with TTL
         ValueStateDescriptor<SortedMap<Double, Long>> treeMapDescriptor = 
             new ValueStateDescriptor<>("tree-map", 
                 TypeInformation.of(new TypeHint<SortedMap<Double, Long>>() {}));
         treeMapDescriptor.enableTimeToLive(ttlConfig);
         treeMap = getRuntimeContext().getState(treeMapDescriptor);
-        
-        // Initialize cleanup time state
-        ValueStateDescriptor<Long> cleanupDescriptor = 
-            new ValueStateDescriptor<>("last-cleanup", Types.LONG);
-        lastCleanupTime = getRuntimeContext().getState(cleanupDescriptor);
+
+        // Initialize timer registration state with TTL
+        ValueStateDescriptor<Boolean> timerDescriptor = 
+            new ValueStateDescriptor<>("timer-registered", Types.BOOLEAN);
+        timerDescriptor.enableTimeToLive(ttlConfig);
+        timerRegistered = getRuntimeContext().getState(timerDescriptor);
     }
     
     @Override
@@ -110,8 +108,9 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             Score input,
             KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context ctx,
             Collector<ScoreChangeEvent> out) throws Exception {
-        long currentTime = ctx.timestamp();
-        performPeriodicCleanup(currentTime);
+        
+        // Register cleanup timer if not already registered
+        registerCleanupTimer(ctx);
 
         SortedMap<Double, Long> currentTreeMap = treeMap.value();
         if (currentTreeMap == null) {
@@ -122,14 +121,30 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         if (input.getPreviousScore() != 0.0) {
             Double prevSortKey = input.getPreviousScore();
             
-            // Find the actual previous record by userId in the previousScore bucket
-            Score actualPrevRecord = findAndRemoveUserFromBucket(input.getId(), prevSortKey, currentTreeMap);
+            // Emit retraction (this will handle finding and removing from dataState internally)
+            boolean stateRemoved = retractRecordWithoutRowNumber(currentTreeMap, prevSortKey, input.getId(), out);
             
-            // Emit retraction records without row number using the actual previous record
-            if (actualPrevRecord != null) {
-                retractRecordWithoutRowNumber(currentTreeMap, prevSortKey, actualPrevRecord, out);
+           
+            // If retractRecord didn't remove from dataState, do manual removal
+            if (!stateRemoved) {
+                stateRemoved = removeUserFromDataState(input.getId(), prevSortKey);
             }
+            if (stateRemoved) { // if stateRemoved is true, update sortedMap
+                 // Update sortedMap after emitting
+                if (currentTreeMap.containsKey(prevSortKey)) {
+                    long count = currentTreeMap.get(prevSortKey) - 1;
+                    if (count == 0) {
+                        currentTreeMap.remove(prevSortKey);
+                    } else {
+                        currentTreeMap.put(prevSortKey, count);
+                    }
+                } else {
+                    // Handle stale state - log warning but continue
+                    LOG.warn("Previous score {} not found in treeMap for user {}", prevSortKey, input.getId());
+                }
+            
         }
+    }
 
         // Process accumulation for current score
         Double sortKey = input.getScore();
@@ -156,41 +171,32 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         treeMap.update(currentTreeMap);
     }
     
+    
     /**
-     * Find user in specific score bucket and remove, return the actual record that was removed
+     * Remove user from dataState only (called after emit)
      */
-    private Score findAndRemoveUserFromBucket(String userId, Double scoreValue, SortedMap<Double, Long> currentTreeMap) throws Exception {
+    private boolean removeUserFromDataState(String userId, Double scoreValue) throws Exception {
+        boolean stateRemoved = false;
         List<Score> scoresAtThisValue = dataState.get(scoreValue);
         if (scoresAtThisValue != null) {
             Iterator<Score> iter = scoresAtThisValue.iterator();
             while (iter.hasNext()) {
                 Score score = iter.next();
                 if (score.getId().equals(userId)) {
-                    // Found the actual previous record, remove it
                     iter.remove();
-                    
-                    // Update tree map count
-                    Long count = currentTreeMap.get(scoreValue);
-                    if (count != null) {
-                        if (count <= 1) {
-                            currentTreeMap.remove(scoreValue);
-                        } else {
-                            currentTreeMap.put(scoreValue, count - 1);
-                        }
-                    }
-                    
-                    // Update data state
-                    if (scoresAtThisValue.isEmpty()) {
-                        dataState.remove(scoreValue);
-                    } else {
-                        dataState.put(scoreValue, scoresAtThisValue);
-                    }
-                    
-                    return score; // Return the actual record with correct timestamp
+                    stateRemoved = true;
+                    break;
                 }
             }
+            
+            // Update data state
+            if (scoresAtThisValue.isEmpty()) {
+                dataState.remove(scoreValue);
+            } else {
+                dataState.put(scoreValue, scoresAtThisValue);
+            }
         }
-        return null; // User not found in this bucket
+        return stateRemoved;
     }
     
     /**
@@ -214,7 +220,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             
             if (!findsSortKey && key.equals(sortKey)) {
                 curRank += entry.getValue();
-                if (isInRankRange(curRank)) {
+                if (isInRankEnd(curRank)) {
                     toCollect = inputRow;
                 }
                 findsSortKey = true;
@@ -234,6 +240,9 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                         }
                         break;
                     }
+                } else {
+                    // Stale state: treeMap has key but dataState doesn't
+                    processStateStaled(sortedMap, key);
                 }
             } else {
                 curRank += entry.getValue();
@@ -250,16 +259,18 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     
     /**
      * Retract record without row number - adapted from Flink's retractRecordWithoutRowNumber
+     * @return true if the record was found and removed from dataState
      */
-    private void retractRecordWithoutRowNumber(
+    private boolean retractRecordWithoutRowNumber(
             SortedMap<Double, Long> sortedMap,
             Double sortKey,
-            Score inputRow,
+            String id,
             Collector<ScoreChangeEvent> out) throws Exception {
         
         Iterator<Map.Entry<Double, Long>> iterator = sortedMap.entrySet().iterator();
         long nextRank = 1L; // the next rank number, should be in the rank range
         boolean findsSortKey = false;
+        boolean stateRemoved = false;
         
         while (iterator.hasNext() && isInRankEnd(nextRank)) {
             Map.Entry<Double, Long> entry = iterator.next();
@@ -271,10 +282,14 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                     Iterator<Score> inputIter = inputs.iterator();
                     while (inputIter.hasNext() && isInRankEnd(nextRank)) {
                         Score prevRow = inputIter.next();
-                        if (!findsSortKey && prevRow.getId().equals(inputRow.getId())) {
-                            if (isInRankRange(nextRank)) {
+                        if (!findsSortKey && prevRow.getId().equals(id)) {
+                            // Found the record to retract
+                            if (isInRankEnd(nextRank)) {
                                 out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, prevRow, -1));
                             }
+                            // Remove from dataState
+                            inputIter.remove();
+                            stateRemoved = true;
                             findsSortKey = true;
                         } else if (findsSortKey) {
                             if (nextRank == topN) {
@@ -283,6 +298,18 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                         }
                         nextRank += 1;
                     }
+                    
+                    // Update dataState after removal
+                    if (stateRemoved) {
+                        if (inputs.isEmpty()) {
+                            dataState.remove(key);
+                        } else {
+                            dataState.put(key, inputs);
+                        }
+                    }
+                } else {
+                    // Stale state: treeMap has key but dataState doesn't
+                    processStateStaled(sortedMap, key);
                 }
             } else if (findsSortKey) {
                 long count = entry.getValue();
@@ -298,62 +325,129 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                         Score toAdd = inputs.get(index);
                         out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, toAdd, -1));
                         break;
+                    } else if (inputs == null) {
+                        // Stale state: treeMap has key but dataState doesn't
+                        processStateStaled(sortedMap, key);
+        
                     }
                 }
             } else {
                 nextRank += entry.getValue();
             }
         }
+        
+        return stateRemoved;
     }
     
 
     
     /**
-     * Performs periodic cleanup of expired entries
+     * Register cleanup timer if not already registered
      */
-    private void performPeriodicCleanup(long currentTime) throws Exception {
-        Long lastCleanup = lastCleanupTime.value();
+    private void registerCleanupTimer(KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context ctx) throws Exception {
+        Boolean registered = timerRegistered.value();
         
-        if (lastCleanup == null || (currentTime - lastCleanup) > CLEANUP_INTERVAL_MS) {
-            cleanupExpiredEntries(currentTime);
-            lastCleanupTime.update(currentTime);
+        if (registered == null || !registered) {
+            // First time - register timer for next cleanup
+            long currentTime = ctx.timestamp();
+            long nextCleanupTime = currentTime + cleanupIntervalMs;
+            ctx.timerService().registerEventTimeTimer(nextCleanupTime);
+            timerRegistered.update(true);
         }
     }
     
     /**
-     * Removes entries that are older than TTL
+     * Process stale state when dataState key is expired but treeMap key still exists
+     * This can happen when TTL expires dataState entries but treeMap hasn't been cleaned up yet
      */
-    private void cleanupExpiredEntries(long currentTime) throws Exception {
+    private void processStateStaled(SortedMap<Double, Long> currentTreeMap, Double scoreKey) throws Exception {
+        LOG.warn("Detected stale state: scoreKey {} exists in treeMap but not in dataState, cleaning up", scoreKey);
+        
+        // Remove the stale key from treeMap since corresponding dataState is gone
+        currentTreeMap.remove(scoreKey);
+        
+        LOG.debug("Removed stale scoreKey {} from treeMap", scoreKey);
+    }
+    
+    
+    
+    /**
+     * Removes entries that are older than TTL and emits appropriate change events
+     */
+    private void cleanupExpiredEntries(long currentTime, Collector<ScoreChangeEvent> out) throws Exception {
         long expirationTime = currentTime - (ttlMinutes * 60 * 1000L);
-        List<Double> scoresToRemove = new ArrayList<>();
+        SortedMap<Double, Long> currentTreeMap = treeMap.value();
+        if (currentTreeMap == null) {
+            currentTreeMap = new TreeMap<>(SCORE_COMPARATOR);
+        }
+        
+        // Collect expired records to retract
+        List<Score> expiredRecords = new ArrayList<>();
         
         // Find expired entries
         for (Double scoreValue : dataState.keys()) {
             List<Score> scoresAtThisValue = dataState.get(scoreValue);
             if (scoresAtThisValue != null) {
-                scoresAtThisValue.removeIf(score -> score.getLastUpdateTime() < expirationTime);
-                
-                if (scoresAtThisValue.isEmpty()) {
-                    scoresToRemove.add(scoreValue);
-                } else {
-                    dataState.put(scoreValue, scoresAtThisValue);
+                // Collect expired records before removing
+                for (Score score : scoresAtThisValue) {
+                    if (score.getLastUpdateTime() < expirationTime) {
+                        expiredRecords.add(score);
+                    }
                 }
             }
         }
         
-        // Remove empty score buckets and update tree map
-        SortedMap<Double, Long> currentTreeMap = treeMap.value();
-        if (currentTreeMap != null) {
-            for (Double scoreValue : scoresToRemove) {
-                dataState.remove(scoreValue);
-                currentTreeMap.remove(scoreValue);
+        // Process each expired record using same logic as processElement
+        for (Score expiredRecord : expiredRecords) {
+            Double scoreValue = expiredRecord.getScore();
+            String userId = expiredRecord.getId();
+            
+            // Try retract from Top-N (emit events if needed)
+            boolean stateRemoved = retractRecordWithoutRowNumber(currentTreeMap, scoreValue, userId, out);
+            
+            // If retractRecord didn't remove from dataState, do manual removal
+            if (!stateRemoved) {
+                stateRemoved = removeUserFromDataState(userId, scoreValue);
             }
-            treeMap.update(currentTreeMap);
+            
+            // If stateRemoved is true, update treeMap
+            if (stateRemoved) {
+                if (currentTreeMap.containsKey(scoreValue)) {
+                    long count = currentTreeMap.get(scoreValue) - 1;
+                    if (count == 0) {
+                        currentTreeMap.remove(scoreValue);
+                    } else {
+                        currentTreeMap.put(scoreValue, count);
+                    }
+                } else {
+                    // Handle stale state - log warning but continue
+                    LOG.warn("Expired score {} not found in treeMap for user {}", scoreValue, userId);
+                }
+            }
         }
         
-        if (!scoresToRemove.isEmpty()) {
-            LOG.debug("Cleaned up {} expired score buckets", scoresToRemove.size());
+        // Update treeMap state
+        treeMap.update(currentTreeMap);
+        
+        if (!expiredRecords.isEmpty()) {
+            LOG.info("Cleaned up {} expired records, processed retractions", expiredRecords.size());
         }
+    }
+    
+    @Override
+    public void onTimer(long timestamp, 
+                       KeyedProcessFunction<String, Score, ScoreChangeEvent>.OnTimerContext ctx, 
+                       Collector<ScoreChangeEvent> out) throws Exception {
+        
+        // Perform cleanup and emit change events for expired records
+        cleanupExpiredEntries(timestamp, out);
+        
+        // Register next cleanup timer
+        long nextCleanupTime = timestamp + cleanupIntervalMs;
+        ctx.timerService().registerEventTimeTimer(nextCleanupTime);
+    
+        
+        LOG.debug("Cleanup timer fired at timestamp: {}, next cleanup at: {}", timestamp, nextCleanupTime);
     }
     
     @Override

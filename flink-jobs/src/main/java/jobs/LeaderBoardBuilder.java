@@ -48,11 +48,11 @@ public class LeaderBoardBuilder {
 		.map(u -> new Score(u.getUserId(), Math.max(u.getLevel()-u.getPreviousLevel(), 0), u.getUpdatedAt()));
 	
 		DataStream<Score> userTotalLevelGained = userLevelGained.keyBy(Score::getId)
-			.process(new TotalScoreTimeRangeBoundedPrecedingFunction(1))
+			.process(new TotalScoreTimeRangeBoundedPrecedingFunction(1,5))
 			.name("user-total-level-gained-in-last-x-minutes");
 
 		DataStream<ScoreChangeEvent> topNUserTotalLevelGained = userTotalLevelGained.keyBy(u -> "")
-			.process(new RetractableTopNFunction(10, 5))
+			.process(new RetractableTopNFunction(10, 120,5))
 			.name("top-n-user-total-level-gained-in-last-x-minutes-recent-y-minutes");
 
 		// Sink the change events to Redis using incremental updates
