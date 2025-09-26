@@ -49,15 +49,17 @@ public class ScoreChangeEventSink implements Sink<ScoreChangeEvent> {
             if (jedis == null) {
                 jedis = new JedisPooled(redisHost, redisPort);
             }
-            
+
             if (changeEvent == null || changeEvent.getScore() == null) {
                 LOG.warn("Received null change event or score, skipping");
                 return;
             }
-            
+
+            // Log the entire change event for debugging/auditing
+            LOG.info("Processing ScoreChangeEvent: {}", changeEvent);
+
             String userId = changeEvent.getScore().getId();
             double score = changeEvent.getScore().getScore();
-            
             try {
                 if (changeEvent.isInsert()) {
                     // INSERT: Add the score to the sorted set
@@ -76,8 +78,7 @@ public class ScoreChangeEventSink implements Sink<ScoreChangeEvent> {
                     }
                 }
                 
-                // Optional: Set expiration time for the key (e.g., 1 hour)
-                jedis.expire(redisKey, 3600);
+               
                 
             } catch (Exception e) {
                 LOG.error("Failed to process change event {} for Redis key '{}'", 

@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 2,
+  "id": 1,
   "links": [],
   "panels": [
     {
@@ -355,7 +355,7 @@
           "zrangeQuery": ""
         }
       ],
-      "title": "All-time Leaderboard (Top 20)",
+      "title": "Top user in 1minute recent 5minute",
       "transformations": [
         {
           "id": "reduce",
@@ -400,5 +400,5 @@
   "timezone": "",
   "title": "Redis Leaderboards",
   "uid": "redis-leaderboards",
-  "version": 2
+  "version": 1
 }

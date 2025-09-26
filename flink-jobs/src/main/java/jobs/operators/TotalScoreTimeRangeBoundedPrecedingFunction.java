@@ -225,7 +225,7 @@ public class TotalScoreTimeRangeBoundedPrecedingFunction
 
             // create output score with total accumulated score
             Score outputScore = new Score(ctx.getCurrentKey(), totalScore, previousTotalScore, timestamp);
-            LOG.info("Emitting outputScore: {}", outputScore);
+            // LOG.info("Emitting outputScore: {}", outputScore);
             out.collect(outputScore);
             
             // update previousScoreState
