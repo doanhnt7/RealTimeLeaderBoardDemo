@@ -225,10 +225,11 @@ public class TotalScoreTimeRangeBoundedPrecedingFunction
 
             // create output score with total accumulated score
             Score outputScore = new Score(ctx.getCurrentKey(), totalScore, previousTotalScore, timestamp);
+            LOG.info("Emitting outputScore: {}", outputScore);
             out.collect(outputScore);
             
-             // update previousScoreState
-             previousScoreState.update(previousTotalScore);
+            // update previousScoreState
+            previousScoreState.update(totalScore);
 
             // remove the data that has been retracted
             for (Long retractTs : retractTsList) {

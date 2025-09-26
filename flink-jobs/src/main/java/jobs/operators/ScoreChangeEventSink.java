@@ -57,21 +57,20 @@ public class ScoreChangeEventSink implements Sink<ScoreChangeEvent> {
             
             String userId = changeEvent.getScore().getId();
             double score = changeEvent.getScore().getScore();
-            int rank = changeEvent.getRank();
             
             try {
                 if (changeEvent.isInsert()) {
                     // INSERT: Add the score to the sorted set
                     jedis.zadd(redisKey, score, userId);
-                    LOG.debug("INSERT: Added user {} with score {} to Redis key '{}' at rank {}", 
-                        userId, score, redisKey, rank);
+                    LOG.debug("INSERT: Added user {} with score {} to Redis key '{}'", 
+                        userId, score, redisKey);
                         
                 } else if (changeEvent.isDelete()) {
                     // DELETE: Remove the score from the sorted set
                     long removed = jedis.zrem(redisKey, userId);
                     if (removed > 0) {
-                        LOG.debug("DELETE: Removed user {} from Redis key '{}' from rank {}", 
-                            userId, redisKey, rank);
+                        LOG.debug("DELETE: Removed user {} from Redis key '{}'", 
+                            userId, redisKey);
                     } else {
                         LOG.warn("DELETE: User {} was not found in Redis key '{}'", userId, redisKey);
                     }

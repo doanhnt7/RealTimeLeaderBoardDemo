@@ -18,10 +18,14 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
+  "id": 2,
   "links": [],
   "panels": [
     {
-      "datasource": { "uid": "redis", "type": "redis-datasource" },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -32,38 +36,46 @@
             "cellOptions": {
               "type": "auto"
             },
+            "footer": {
+              "reducers": []
+            },
             "inspect": false
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": 0 }
+              {
+                "color": "green",
+                "value": 0
+              }
             ]
           }
         },
         "overrides": []
       },
-      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 0 },
-      "id": 1,
-      "options": { 
-        "cellHeight": "sm", 
-        "footer": { 
-          "countRows": false, 
-          "fields": "", 
-          "reducer": ["sum"], 
-          "show": false 
-        }, 
-        "frameIndex": 0, 
-        "showHeader": true 
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 0
       },
-      "pluginVersion": "12.1.1",
+      "id": 1,
+      "options": {
+        "cellHeight": "sm",
+        "frameIndex": 0,
+        "showHeader": true
+      },
+      "pluginVersion": "12.2.0",
       "targets": [
         {
           "command": "zrange",
-          "datasource": { "type": "redis-datasource", "uid": "redis" },
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "redis"
+          },
           "hide": false,
-          "keyName": "leaderboard_weekly_highest_level:2025:38",
+          "keyName": "leaderboard_weekly_highest_level:2025:39",
           "max": "-1",
           "min": "0",
           "query": "",
@@ -100,7 +112,10 @@
       "type": "table"
     },
     {
-      "datasource": { "uid": "redis", "type": "redis-datasource" },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -111,38 +126,46 @@
             "cellOptions": {
               "type": "auto"
             },
+            "footer": {
+              "reducers": []
+            },
             "inspect": false
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": 0 }
+              {
+                "color": "green",
+                "value": 0
+              }
             ]
           }
         },
         "overrides": []
       },
-      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 0 },
-      "id": 2,
-      "options": { 
-        "cellHeight": "sm", 
-        "footer": { 
-          "countRows": false, 
-          "fields": "", 
-          "reducer": ["sum"], 
-          "show": false 
-        }, 
-        "frameIndex": 0, 
-        "showHeader": true 
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 0
       },
-      "pluginVersion": "12.1.1",
+      "id": 2,
+      "options": {
+        "cellHeight": "sm",
+        "frameIndex": 0,
+        "showHeader": true
+      },
+      "pluginVersion": "12.2.0",
       "targets": [
         {
           "command": "zrange",
-          "datasource": { "type": "redis-datasource", "uid": "redis" },
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "redis"
+          },
           "hide": false,
-          "keyName": "leaderboard_weekly_levels_gained:2025:38",
+          "keyName": "leaderboard_weekly_levels_gained:2025:39",
           "max": "-1",
           "min": "0",
           "query": "",
@@ -179,7 +202,10 @@
       "type": "table"
     },
     {
-      "datasource": { "uid": "redis", "type": "redis-datasource" },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -190,36 +216,44 @@
             "cellOptions": {
               "type": "auto"
             },
+            "footer": {
+              "reducers": []
+            },
             "inspect": false
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": 0 }
+              {
+                "color": "green",
+                "value": 0
+              }
             ]
           }
         },
         "overrides": []
       },
-      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 0 },
-      "id": 3,
-      "options": { 
-        "cellHeight": "sm", 
-        "footer": { 
-          "countRows": false, 
-          "fields": "", 
-          "reducer": ["sum"], 
-          "show": false 
-        }, 
-        "frameIndex": 0, 
-        "showHeader": true 
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 0
       },
-      "pluginVersion": "12.1.1",
+      "id": 3,
+      "options": {
+        "cellHeight": "sm",
+        "frameIndex": 0,
+        "showHeader": true
+      },
+      "pluginVersion": "12.2.0",
       "targets": [
         {
           "command": "zrange",
-          "datasource": { "type": "redis-datasource", "uid": "redis" },
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "redis"
+          },
           "hide": false,
           "keyName": "leaderboard_user_alltime",
           "max": "-1",
@@ -256,20 +290,115 @@
         }
       ],
       "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 9
+      },
+      "id": 4,
+      "options": {
+        "cellHeight": "sm",
+        "frameIndex": 0,
+        "showHeader": true
+      },
+      "pluginVersion": "12.2.0",
+      "targets": [
+        {
+          "command": "zrange",
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "redis"
+          },
+          "hide": false,
+          "keyName": "top_level_gainers_recent",
+          "max": "-1",
+          "min": "0",
+          "query": "",
+          "refId": "A",
+          "streaming": false,
+          "type": "command",
+          "zrangeQuery": ""
+        }
+      ],
+      "title": "All-time Leaderboard (Top 20)",
+      "transformations": [
+        {
+          "id": "reduce",
+          "options": {
+            "labelsToFields": true,
+            "reducers": [
+              "sum"
+            ]
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Total"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
     }
   ],
+  "preload": false,
   "refresh": "10s",
-  "schemaVersion": 41,
+  "schemaVersion": 42,
   "tags": [
     "redis",
     "leaderboard"
   ],
-  "templating": { "list": [] },
-  "time": { "from": "now-15m", "to": "now" },
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "",
   "title": "Redis Leaderboards",
-  "uid": "redis-leaderboards"
+  "uid": "redis-leaderboards",
+  "version": 2
 }
-
-

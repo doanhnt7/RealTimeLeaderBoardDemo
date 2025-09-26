@@ -31,7 +31,7 @@ public class LeaderBoardBuilder {
 
 		DataStream<User> events = env.fromSource(
 				source,
-				WatermarkStrategy.<User>forBoundedOutOfOrderness(Duration.ofSeconds(1))
+				WatermarkStrategy.<User>forBoundedOutOfOrderness(Duration.ofSeconds(0))
 						.withTimestampAssigner((SerializableTimestampAssigner<User>) (e, ts) -> e.getUpdatedAt())
 						.withIdleness(Duration.ofSeconds(30)),
 				"users-source");
@@ -39,9 +39,6 @@ public class LeaderBoardBuilder {
 
 		// Write each record to Redis user all-time ZSET: member=uid, score=level
 		events.sinkTo(new BaseSink("redis", 6379)).name("base-redis-sink");
-
-
-
         
 
         DataStream<Score> userLevelGained = events

@@ -16,12 +16,10 @@ public class ScoreChangeEvent implements Serializable {
     
     private final ChangeType changeType;
     private final Score score;
-    private final int rank;  // Position in the ranking (1-based)
     
-    public ScoreChangeEvent(ChangeType changeType, Score score, int rank) {
+    public ScoreChangeEvent(ChangeType changeType, Score score) {
         this.changeType = changeType;
         this.score = score;
-        this.rank = rank;
     }
     
     public ChangeType getChangeType() {
@@ -30,10 +28,6 @@ public class ScoreChangeEvent implements Serializable {
     
     public Score getScore() {
         return score;
-    }
-    
-    public int getRank() {
-        return rank;
     }
     
     public boolean isInsert() {
@@ -46,27 +40,7 @@ public class ScoreChangeEvent implements Serializable {
     
     @Override
     public String toString() {
-        return String.format("ScoreChangeEvent{type=%s, score=%s, rank=%d}", 
-            changeType, score, rank);
-    }
-    
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        
-        ScoreChangeEvent that = (ScoreChangeEvent) o;
-        
-        if (rank != that.rank) return false;
-        if (changeType != that.changeType) return false;
-        return score != null ? score.equals(that.score) : that.score == null;
-    }
-    
-    @Override
-    public int hashCode() {
-        int result = changeType != null ? changeType.hashCode() : 0;
-        result = 31 * result + (score != null ? score.hashCode() : 0);
-        result = 31 * result + rank;
-        return result;
+        return String.format("ScoreChangeEvent{type=%s, score=%s}", 
+            changeType, score);
     }
 }

@@ -8,8 +8,6 @@ import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.Types;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
@@ -23,7 +21,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
-
+import org.apache.flink.table.runtime.typeutils.SortedMapTypeInfo;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
+import java.util.Collections;
 /**
  * A retractable TopN function similar to Flink's table runtime version but adapted for Score objects.
  * 
@@ -57,7 +57,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
    
     
     // Comparator for scores (descending order - higher scores first)
-    private static final Comparator<Double> SCORE_COMPARATOR = (s1, s2) -> Double.compare(s2, s1);
+    private static final Comparator<Double> SCORE_COMPARATOR = Collections.reverseOrder();
     
     // Helper methods for rank checking
     private boolean isInRankEnd(long rank) {
@@ -91,8 +91,12 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
 
         // Initialize sorted map state (score -> count) with TTL
         ValueStateDescriptor<SortedMap<Double, Long>> treeMapDescriptor = 
-            new ValueStateDescriptor<>("tree-map", 
-                TypeInformation.of(new TypeHint<SortedMap<Double, Long>>() {}));
+            new ValueStateDescriptor<>(
+                "tree-map",
+            new SortedMapTypeInfo<>(
+                BasicTypeInfo.DOUBLE_TYPE_INFO,    // Key type
+                BasicTypeInfo.LONG_TYPE_INFO,      // Value type
+                SCORE_COMPARATOR));                // Comparator
         treeMapDescriptor.enableTimeToLive(ttlConfig);
         treeMap = getRuntimeContext().getState(treeMapDescriptor);
 
@@ -250,10 +254,10 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         }
         
         if (toDelete != null) {
-            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, toDelete, -1));
+            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, toDelete));
         }
         if (toCollect != null) {
-            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, inputRow, -1));
+            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, inputRow));
         }
     }
     
@@ -285,7 +289,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                         if (!findsSortKey && prevRow.getId().equals(id)) {
                             // Found the record to retract
                             if (isInRankEnd(nextRank)) {
-                                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, prevRow, -1));
+                                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, prevRow));
                             }
                             // Remove from dataState
                             inputIter.remove();
@@ -293,7 +297,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                             findsSortKey = true;
                         } else if (findsSortKey) {
                             if (nextRank == topN) {
-                                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, prevRow, -1));
+                                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, prevRow));
                             }
                         }
                         nextRank += 1;
@@ -323,7 +327,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                     List<Score> inputs = dataState.get(key);
                     if (inputs != null && index < inputs.size()) {
                         Score toAdd = inputs.get(index);
-                        out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, toAdd, -1));
+                        out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, toAdd));
                         break;
                     } else if (inputs == null) {
                         // Stale state: treeMap has key but dataState doesn't

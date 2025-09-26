@@ -8,6 +8,8 @@ import redis.clients.jedis.JedisPooled;
 import java.time.OffsetDateTime;
 import java.time.temporal.WeekFields;
 import java.util.Locale;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class BaseSink implements Sink<User> {
     private final String redisHost;
@@ -24,6 +26,8 @@ public class BaseSink implements Sink<User> {
     }
 
     private static class RedisSinkWriter implements SinkWriter<User> {
+        private static final Logger LOG = LoggerFactory.getLogger(RedisSinkWriter.class);
+
         private final String redisHost;
         private final int redisPort;
         private transient JedisPooled jedis;
@@ -43,6 +47,7 @@ public class BaseSink implements Sink<User> {
                 String uid = value.getUid();
                 int level = value.getLevel();
                 int prevLevel = value.getPreviousLevel();
+                int scoreDelta = level - prevLevel;
                 if (uid != null) {
                     jedis.zadd("leaderboard_user_alltime", (double) level, uid);
 
@@ -55,11 +60,13 @@ public class BaseSink implements Sink<User> {
                     int year = ts.getYear();
                     String weeklyHighestLevelKey = "leaderboard_weekly_highest_level:" + year + ":" + weekNumber;
                     String weeklyKeyLevelsGained = "leaderboard_weekly_levels_gained:" + year + ":" + weekNumber;
-                    int scoreDelta = level - prevLevel;
                     if (scoreDelta > 0) {
                         jedis.zincrby(weeklyKeyLevelsGained, (double) scoreDelta, uid);
                     }
                     jedis.zadd(weeklyHighestLevelKey, (double) level, uid);
+
+                    // Logging level, previous level, and score delta
+                    // LOG.info("User {}: level={}, previousLevel={}, scoreDelta={}", uid, level, prevLevel, scoreDelta);
                 }
             }
         }

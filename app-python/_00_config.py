@@ -15,7 +15,7 @@ class Config:
     MONGO_URI = os.getenv('MONGO_URI', 'mongodb://mongo:27017')
     MONGO_DB = os.getenv('MONGO_DB', 'leaderboard')
     MONGO_COLLECTION = os.getenv('MONGO_COLLECTION', 'user_submissions')
-    NUM_USER = 100
+    NUM_USER = 1
     NUM_APP = 1
     
     # Redis cache settings (for user profile cache)
