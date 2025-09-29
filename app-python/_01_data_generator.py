@@ -4,7 +4,7 @@ Realtime user document generator (minimal)
 
 import random
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional, List
 import json
 import structlog
@@ -53,6 +53,8 @@ class UserDataGenerator:
 
         # Initialize Redis client for caching user profiles
         self._logger = structlog.get_logger()
+        # Counter to advance logical time by 0.1s per emission
+        self._generated_count: int = 0
         try:
             self._redis = redis.Redis(
                 host=config.REDIS_HOST,
@@ -85,7 +87,9 @@ class UserDataGenerator:
 
     def generate_user_submission(self) -> Dict[str, Any]:
     
-        now = datetime.now(timezone.utc)
+        # Advance time deterministically by 0.1s per generated record
+        logical_offset_seconds = self._generated_count / 10.0
+        now = datetime.now(timezone.utc) + timedelta(seconds=logical_offset_seconds)
         # Select a user uid from the pre-generated list
         uid = random.choice(self.user_uids)
         # Dynamic fields only below (fixed are loaded from cache)
@@ -120,6 +124,8 @@ class UserDataGenerator:
             "updatedAt": updated_dt,
             "team": base["team"],
         }
+        # Increment counter after emission
+        self._generated_count += 1
         return document
 
 # ----------------------------------------------------------
