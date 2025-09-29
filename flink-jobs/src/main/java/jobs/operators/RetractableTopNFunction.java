@@ -52,10 +52,9 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     
     // State to track if cleanup timer is registered
     private transient ValueState<Boolean> timerRegistered;
-    
-    // TTL configuration
    
-    
+    class RetractContext { Score insertFromRetract; Score deleteFromRetract; }
+
     // Comparator for scores (descending order - higher scores first)
     private static final Comparator<Double> SCORE_COMPARATOR = Collections.reverseOrder();
     
@@ -105,6 +104,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             new ValueStateDescriptor<>("timer-registered", Types.BOOLEAN);
         timerDescriptor.enableTimeToLive(ttlConfig);
         timerRegistered = getRuntimeContext().getState(timerDescriptor);
+
     }
     
     @Override
@@ -120,13 +120,24 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         if (currentTreeMap == null) {
             currentTreeMap = new TreeMap<>(SCORE_COMPARATOR);
         }
-
+        RetractContext retractContext = new RetractContext();
+        
+        Double sortKey = input.getScore();
+        Double prevSortKey = input.getPreviousScore();
         // Process retraction first if previousScore exists
-        if (input.getPreviousScore() != 0.0) {
-            Double prevSortKey = input.getPreviousScore();
-            
+        if (prevSortKey != 0.0) {
+            if(sortKey.equals(prevSortKey)){
+                // Update dataState for accumulation
+                List<Score> inputs = dataState.get(sortKey);
+                if (inputs == null) {
+                    inputs = new ArrayList<>();
+                }
+                inputs.add(input);
+                dataState.put(sortKey, inputs);
+                return;
+            }
             // Emit retraction (this will handle finding and removing from dataState internally)
-            boolean stateRemoved = retractRecordWithoutRowNumber(currentTreeMap, prevSortKey, input.getId(), out);
+            boolean stateRemoved = retractRecordWithoutRowNumber(currentTreeMap, prevSortKey, input.getId(), out, retractContext);
             
            
             // If retractRecord didn't remove from dataState, do manual removal
@@ -147,12 +158,9 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                     LOG.warn("Previous score {} not found in treeMap for user {}", prevSortKey, input.getId());
                 }
             
+            }
         }
-    }
 
-        // Process accumulation for current score
-        Double sortKey = input.getScore();
-        
         // Update sortedMap for accumulation
         if (currentTreeMap.containsKey(sortKey)) {
             currentTreeMap.put(sortKey, currentTreeMap.get(sortKey) + 1);
@@ -161,7 +169,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         }
 
         // Emit accumulation records without row number
-        emitRecordsWithoutRowNumber(currentTreeMap, sortKey, input, out);
+        emitRecordsWithoutRowNumber(currentTreeMap, sortKey, input, out, retractContext);
         
         // Update dataState for accumulation
         List<Score> inputs = dataState.get(sortKey);
@@ -210,12 +218,13 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             SortedMap<Double, Long> sortedMap,
             Double sortKey,
             Score inputRow,
-            Collector<ScoreChangeEvent> out) throws Exception {
+            Collector<ScoreChangeEvent> out,
+            RetractContext retractContext) throws Exception {
         
         Iterator<Map.Entry<Double, Long>> iterator = sortedMap.entrySet().iterator();
         long curRank = 0L;
         boolean findsSortKey = false;
-        Score toCollect = null;
+        Score toInsert = null;
         Score toDelete = null;
         
         while (iterator.hasNext() && isInRankEnd(curRank)) {
@@ -225,7 +234,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             if (!findsSortKey && key.equals(sortKey)) {
                 curRank += entry.getValue();
                 if (isInRankEnd(curRank)) {
-                    toCollect = inputRow;
+                    toInsert = inputRow;
                 }
                 findsSortKey = true;
             } else if (findsSortKey) {
@@ -252,11 +261,16 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                 curRank += entry.getValue();
             }
         }
-        
-        if (toDelete != null) {
-            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, toDelete));
+
+        if(toInsert == null) {
+            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, retractContext.deleteFromRetract));
+            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, retractContext.insertFromRetract));
+           
         }
-        if (toCollect != null) {
+        else {
+            if(retractContext.deleteFromRetract == null) {
+                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, toDelete));
+            }
             out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, inputRow));
         }
     }
@@ -269,12 +283,12 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             SortedMap<Double, Long> sortedMap,
             Double sortKey,
             String id,
-            Collector<ScoreChangeEvent> out) throws Exception {
+            Collector<ScoreChangeEvent> out,
+            RetractContext retractContext) throws Exception {
         
         Iterator<Map.Entry<Double, Long>> iterator = sortedMap.entrySet().iterator();
         long nextRank = 1L; // the next rank number, should be in the rank range
         boolean findsSortKey = false;
-        boolean stateRemoved = false;
         
         while (iterator.hasNext() && isInRankEnd(nextRank)) {
             Map.Entry<Double, Long> entry = iterator.next();
@@ -289,22 +303,23 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                         if (!findsSortKey && prevRow.getId().equals(id)) {
                             // Found the record to retract
                             if (isInRankEnd(nextRank)) {
-                                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, prevRow));
+                                retractContext.deleteFromRetract = prevRow;
                             }
+                            nextRank -= 1;
+                            findsSortKey = true;
                             // Remove from dataState
                             inputIter.remove();
-                            stateRemoved = true;
-                            findsSortKey = true;
+                           
                         } else if (findsSortKey) {
                             if (nextRank == topN) {
-                                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, prevRow));
+                                retractContext.insertFromRetract = prevRow;
                             }
                         }
                         nextRank += 1;
                     }
                     
                     // Update dataState after removal
-                    if (stateRemoved) {
+                    if (findsSortKey) {
                         if (inputs.isEmpty()) {
                             dataState.remove(key);
                         } else {
@@ -327,7 +342,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                     List<Score> inputs = dataState.get(key);
                     if (inputs != null && index < inputs.size()) {
                         Score toAdd = inputs.get(index);
-                        out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, toAdd));
+                        retractContext.insertFromRetract = toAdd;
                         break;
                     } else if (inputs == null) {
                         // Stale state: treeMap has key but dataState doesn't
@@ -340,7 +355,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             }
         }
         
-        return stateRemoved;
+        return findsSortKey;
     }
     
 
@@ -387,7 +402,8 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         
         // Collect expired records to retract
         List<Score> expiredRecords = new ArrayList<>();
-        
+       
+
         // Find expired entries
         for (Double scoreValue : dataState.keys()) {
             List<Score> scoresAtThisValue = dataState.get(scoreValue);
@@ -405,13 +421,15 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         for (Score expiredRecord : expiredRecords) {
             Double scoreValue = expiredRecord.getScore();
             String userId = expiredRecord.getId();
-            
+            RetractContext retractContext = new RetractContext();
             // Try retract from Top-N (emit events if needed)
-            boolean stateRemoved = retractRecordWithoutRowNumber(currentTreeMap, scoreValue, userId, out);
-            
+            boolean stateRemoved = retractRecordWithoutRowNumber(currentTreeMap, scoreValue, userId, out, retractContext);
             // If retractRecord didn't remove from dataState, do manual removal
             if (!stateRemoved) {
                 stateRemoved = removeUserFromDataState(userId, scoreValue);
+            }else if(retractContext.insertFromRetract != null){
+                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, retractContext.deleteFromRetract));
+                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, retractContext.insertFromRetract));
             }
             
             // If stateRemoved is true, update treeMap

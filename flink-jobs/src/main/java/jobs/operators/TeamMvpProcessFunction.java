@@ -70,7 +70,7 @@ public class TeamMvpProcessFunction extends KeyedProcessFunction<String, UserSco
                 newMvpUserTotal,
                 teamTotal,
                 currentContribution,
-                null, // No previous contribution needed
+                prevMvpUserId, 
                 value.getLastUpdateTime()
         ));
     }

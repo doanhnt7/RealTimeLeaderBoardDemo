@@ -131,18 +131,21 @@
             <version>${flink.version}</version>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-streaming-java</artifactId>
-            <version>${flink.version}</version>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
+       
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
             <version>3.24.2</version>
             <scope>test</scope>
+        </dependency>
+
+        <dependency>
+        <groupId>org.apache.flink</groupId>
+        <!-- with Flink 1.14+, this is flink-runtime -->
+        <artifactId>flink-runtime</artifactId>
+        <version>${flink.version}</version>
+        <scope>test</scope>
+        <type>test-jar</type>
         </dependency>
 
         <!-- Logging dependencies -->

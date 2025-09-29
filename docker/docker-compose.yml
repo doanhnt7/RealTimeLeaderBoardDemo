@@ -191,6 +191,8 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      connect-init:
+        condition: service_completed_successfully
     environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: leaderboard
@@ -226,4 +228,3 @@ services:
 #   # Declare here only if you prefer Docker-managed volumes
 #   # logs:
 #   # notebook:
-

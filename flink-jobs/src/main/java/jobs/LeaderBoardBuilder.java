@@ -65,42 +65,42 @@ public class LeaderBoardBuilder {
 
 
 
-        // MVP per team pipeline
-        // 1) Compute per-user all-time total score keyed by userId, carry teamId
-		DataStream<UserScore> userTotals = events
-			.keyBy(User::getUserId)
-			.process(new UserAllTimeTotalFunction())
-			.name("user-alltime-total");
+        // // MVP per team pipeline
+        // // 1) Compute per-user all-time total score keyed by userId, carry teamId
+		// DataStream<UserScore> userTotals = events
+		// 	.keyBy(User::getUserId)
+		// 	.process(new UserAllTimeTotalFunction())
+		// 	.name("user-alltime-total");
 
-        // 2) Compute per-team MVP with contribution ratios
-		DataStream<TeamMvp> teamMvp = userTotals
-			.keyBy(UserScore::getTeamId)
-			.process(new TeamMvpProcessFunction())
-			.name("team-mvp");
+        // // 2) Compute per-team MVP with contribution ratios
+		// DataStream<TeamMvp> teamMvp = userTotals
+		// 	.keyBy(UserScore::getTeamId)
+		// 	.process(new TeamMvpProcessFunction())
+		// 	.name("team-mvp");
 
-		// 3) Sink to Redis hash per team
-		teamMvp
-			.sinkTo(new TeamMvpSink(REDIS_HOST, REDIS_PORT, "team_mvp"))
-			.name("redis-team-mvp");
+		// // 3) Sink to Redis hash per team
+		// teamMvp
+		// 	.sinkTo(new TeamMvpSink(REDIS_HOST, REDIS_PORT, "team_mvp"))
+		// 	.name("redis-team-mvp");
 
-        // Hot Streaks pipeline (similar to top-level-gainers)
-        // 1) Compute hot streak ratio per user
-		DataStream<Score> hotStreaks = events
-			.map(u -> new Score(u.getUserId(), Math.max(0, u.getLevel() - u.getPreviousLevel()), u.getUpdatedAt()))
-			.keyBy(Score::getId)
-			.process(new HotStreakProcessFunction(10_000L, 60_000L))
-			.name("hot-streaks");
+        // // Hot Streaks pipeline (similar to top-level-gainers)
+        // // 1) Compute hot streak ratio per user
+		// DataStream<Score> hotStreaks = events
+		// 	.map(u -> new Score(u.getUserId(), Math.max(0, u.getLevel() - u.getPreviousLevel()), u.getUpdatedAt()))
+		// 	.keyBy(Score::getId)
+		// 	.process(new HotStreakProcessFunction(10_000L, 60_000L))
+		// 	.name("hot-streaks");
 
-        // 2) Top N hot streaks using RetractableTopNFunction
-		DataStream<ScoreChangeEvent> topNHotStreaks = hotStreaks
-			.keyBy(u -> "")
-			.process(new RetractableTopNFunction(10, 120, 5))
-			.name("top-n-hotstreaks");
+        // // 2) Top N hot streaks using RetractableTopNFunction
+		// DataStream<ScoreChangeEvent> topNHotStreaks = hotStreaks
+		// 	.keyBy(u -> "")
+		// 	.process(new RetractableTopNFunction(10, 120, 5))
+		// 	.name("top-n-hotstreaks");
 
-        // 3) Sink to Redis using incremental updates
-		topNHotStreaks
-			.sinkTo(new ScoreChangeEventSink(REDIS_HOST, REDIS_PORT, "top_hotstreaks_recent"))
-			.name("redis-top-hotstreaks-incremental-sink");
+        // // 3) Sink to Redis using incremental updates
+		// topNHotStreaks
+		// 	.sinkTo(new ScoreChangeEventSink(REDIS_HOST, REDIS_PORT, "top_hotstreaks_recent"))
+		// 	.name("redis-top-hotstreaks-incremental-sink");
 
 		env.execute("LeaderBoard DataStream Job");
 	}

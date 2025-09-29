@@ -151,7 +151,7 @@ public class TotalScoreTimeRangeBoundedPrecedingFunction
         // update timestamp and register timer if needed
         Long curCleanupTimestamp = cleanupTsState.value();
         if (curCleanupTimestamp == null || curCleanupTimestamp < minCleanupTimestamp) {
-            // we don't delete existing timer since it may delete timer for data processing, can imp
+            // we don't delete existing timer since it may delete timer for data processing,
             ctx.timerService().registerEventTimeTimer(maxCleanupTimestamp);
             cleanupTsState.update(maxCleanupTimestamp);
         }
