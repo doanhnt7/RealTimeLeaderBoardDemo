@@ -51,7 +51,7 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
-      KAFKA_NUM_PARTITIONS: '4'
+      KAFKA_NUM_PARTITIONS: '1'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -174,9 +174,23 @@ services:
     depends_on:
       kafka-connect:
         condition: service_healthy
+      mongo:
+        condition: service_healthy
+      mongo-init-replica:
+        condition: service_completed_successfully
     volumes:
       - ./debezium-mongo-connector.json:/tmp/connector.json:ro
-    entrypoint: ["sh", "-c", "set -e; echo 'Waiting for Kafka Connect...'; until curl -fs http://kafka-connect:8083/connectors > /dev/null; do sleep 2; done; echo 'Registering Debezium connector...'; (curl -fs -X POST http://kafka-connect:8083/connectors -H 'Content-Type: application/json' --data @/tmp/connector.json || curl -fs -X PUT http://kafka-connect:8083/connectors/mongo-leaderboard-connector/config -H 'Content-Type: application/json' --data @/tmp/connector.json); echo 'Connector ensured.'"]
+    entrypoint: ["sh", "-c", "set -e; \
+      echo 'Waiting for Kafka Connect...'; \
+      until curl -fs http://kafka-connect:8083/connectors > /dev/null; do sleep 2; done; \
+      echo 'Registering Debezium connector...'; \
+      (curl -fs -X POST http://kafka-connect:8083/connectors -H 'Content-Type: application/json' --data @/tmp/connector.json \
+        || curl -fs -X PUT http://kafka-connect:8083/connectors/mongo-leaderboard-connector/config -H 'Content-Type: application/json' --data @/tmp/connector.json); \
+      echo 'Waiting for connector and task to be RUNNING...'; \
+      until [ $(curl -fs http://kafka-connect:8083/connectors/mongo-leaderboard-connector/status | grep -o '\"state\":\"RUNNING\"' | wc -l) -ge 2 ]; do \
+        sleep 2; \
+      done; \
+      echo 'Connector is RUNNING.'"]
     restart: "no"
 
   data-generator:
@@ -202,7 +216,8 @@ services:
     volumes:
       - ../app-python:/app
     working_dir: /app
-    command: ["python", "_04_main.py", "start-producer"]
+    command: ["python", "_04_main.py", "replay-json"]
+    # command: ["python", "_04_main.py", "start-producer"]
     # restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "print('ok')"]

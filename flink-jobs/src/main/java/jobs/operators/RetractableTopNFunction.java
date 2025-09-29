@@ -261,14 +261,15 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                 curRank += entry.getValue();
             }
         }
-
+        // LOG.info("toInsert: {}, toDelete: {}, deleteFromRetract: {}, insertFromRetract: {}", toInsert, toDelete, retractContext.deleteFromRetract, retractContext.insertFromRetract);
         if(toInsert == null) {
+            if(retractContext.deleteFromRetract != null) {
             out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, retractContext.deleteFromRetract));
             out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, retractContext.insertFromRetract));
-           
+            }
         }
         else {
-            if(retractContext.deleteFromRetract == null) {
+            if(retractContext.deleteFromRetract == null && toDelete != null) {
                 out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, toDelete));
             }
             out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, inputRow));
