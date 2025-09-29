@@ -49,7 +49,14 @@ def group_events_by_timestamp(events: List[Tuple[int, str, int]]) -> Dict[int, L
     return dict(sorted(grouped.items(), key=lambda kv: kv[0]))
 
 
-def generate_score_change(input_path: str, output_path: str, window_ms: int = 60_000, top_n: int = 10) -> None:
+def generate_score_change(
+    input_path: str,
+    output_path: str,
+    window_ms: int = 60_000,
+    top_n: int = 10,
+    active_ttl_ms: int = 5 * 60_000,
+    cleanup_interval_ms: int = 5 * 60_000,
+) -> None:
     events = load_events(input_path)
     grouped = group_events_by_timestamp(events)
 
@@ -59,6 +66,9 @@ def generate_score_change(input_path: str, output_path: str, window_ms: int = 60
     user_window: Dict[str, Deque[Tuple[int, float]]] = defaultdict(deque)
     rolling_sum: Dict[str, float] = defaultdict(float)
     previous_total_emitted: Dict[str, float] = defaultdict(float)
+    last_submit_time: Dict[str, int] = defaultdict(lambda: -1)
+    # event-time cleanup scheduler (simulate Flink's periodic cleanup timers)
+    next_cleanup_time: int = -1
 
     # global top-N state across time
     # maintain current set for comparison and last known score when in top-N
@@ -76,6 +86,8 @@ def generate_score_change(input_path: str, output_path: str, window_ms: int = 60
             if delta > 0:
                 delta_by_user[uid] += float(delta)
             last_level[uid] = level
+            # track last submit time regardless of delta (a submit occurred)
+            last_submit_time[uid] = ts
 
         # expire window and compute rolling sums before adding new deltas
         window_start = ts - window_ms
@@ -105,9 +117,32 @@ def generate_score_change(input_path: str, output_path: str, window_ms: int = 60
             # We will use these per-user updated totals for global Top-N diff below
             previous_total_emitted[uid] = new_total
 
+        # Initialize next cleanup on first timestamp
+        if next_cleanup_time < 0:
+            next_cleanup_time = ts + cleanup_interval_ms
+
+        # Run cleanup when event-time passes the scheduled cleanup point.
+        # Mirror Flink behavior: advance by fixed 5-minute steps from the last cleanup time.
+        while ts >= next_cleanup_time:
+            cleanup_time = next_cleanup_time
+            inactive_threshold = cleanup_time - active_ttl_ms
+            expired_top = {uid for uid in current_top_set if last_submit_time.get(uid, -1) < inactive_threshold}
+            for uid in sorted(expired_top):
+                score_val = last_top_score.get(uid, rolling_sum.get(uid, 0.0))
+                score_repr = score_str(uid, score_val, cleanup_time, None)
+                out_lines.append(change_event_str("DELETE", score_repr))
+                if uid in current_top_set:
+                    current_top_set.remove(uid)
+            # schedule next cleanup = previous cleanup + interval
+            next_cleanup_time = cleanup_time + cleanup_interval_ms
+
         # Build global scores snapshot at this timestamp (only for users with non-zero totals)
-        # Note: include all users with rolling_sum > 0 for ranking
-        nonzero_users = [(uid, total) for uid, total in rolling_sum.items() if total > 0.0]
+        # NOTE: Do not filter by activity here to allow Top-(N+1) promotion regardless of active status
+        nonzero_users = [
+            (uid, total)
+            for uid, total in rolling_sum.items()
+            if total > 0.0
+        ]
         nonzero_users.sort(key=lambda x: (-x[1], x[0]))
         new_top_users = set([uid for uid, _ in nonzero_users[:top_n]])
 
