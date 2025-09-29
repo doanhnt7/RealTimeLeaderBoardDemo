@@ -143,6 +143,8 @@ services:
     restart: unless-stopped
     depends_on:
       - jobmanager
+    volumes:
+      - ../flink-jobs/result:/opt/flink/jobs
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
