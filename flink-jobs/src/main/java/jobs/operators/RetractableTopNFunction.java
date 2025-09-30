@@ -129,16 +129,6 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         Double prevSortKey = input.getPreviousScore();
         // Process retraction first if previousScore exists
         if (prevSortKey != 0.0) {
-            if(sortKey.equals(prevSortKey)){
-                // Update dataState for accumulation
-                List<Score> inputs = dataState.get(sortKey);
-                if (inputs == null) {
-                    inputs = new ArrayList<>();
-                }
-                inputs.add(input);
-                dataState.put(sortKey, inputs);
-                return;
-            }
             // Emit retraction (this will handle finding and removing from dataState internally)
             boolean stateRemoved = retractRecordWithoutRowNumber(currentTreeMap, prevSortKey, input.getId(), out, retractContext);
             

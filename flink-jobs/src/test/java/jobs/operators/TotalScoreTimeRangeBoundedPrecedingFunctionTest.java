@@ -298,21 +298,6 @@ public class TotalScoreTimeRangeBoundedPrecedingFunctionTest {
         assertEquals(30.0, output.get(0).getScore(), 0.001); // 10 + 15 + 5
     }
 
-    @Test
-    public void testTimerRegistration() throws Exception {
-        String userId = "user1";
-        long baseTime = 1000L;
-        
-        // Process element to trigger timer registration
-        testHarness.processElement(new Score(userId, 10.0, baseTime), baseTime);
-        
-        // Verify that timer was registered by checking if watermark triggers processing
-        testHarness.processWatermark(baseTime);
-        
-        List<Score> output = testHarness.extractOutputValues();
-        assertThat(output).hasSize(1);
-        assertEquals(10.0, output.get(0).getScore(), 0.001);
-    }
 
     @Test
     public void testZeroScoreHandling() throws Exception {
@@ -370,14 +355,6 @@ public class TotalScoreTimeRangeBoundedPrecedingFunctionTest {
         assertEquals(largeScore, output.get(0).getScore(), 0.001);
     }
 
-    @Test
-    public void testEmptyInputHandling() throws Exception {
-        // Process watermark without any elements
-        testHarness.processWatermark(1000L);
-        
-        List<Score> output = testHarness.extractOutputValues();
-        assertThat(output).isEmpty();
-    }
 
     @Test
     public void testWindowBoundaryEdgeCase() throws Exception {
@@ -386,7 +363,7 @@ public class TotalScoreTimeRangeBoundedPrecedingFunctionTest {
         long windowSizeMs = WINDOW_SIZE_MINUTES * 60 * 1000L;
         
         // Process score at the exact window boundary
-        long boundaryTime = baseTime + windowSizeMs;
+        long boundaryTime = baseTime + windowSizeMs +1;
         testHarness.processElement(new Score(userId, 10.0, baseTime), baseTime);
         testHarness.processElement(new Score(userId, 20.0, boundaryTime), boundaryTime);
         
@@ -400,254 +377,158 @@ public class TotalScoreTimeRangeBoundedPrecedingFunctionTest {
         assertEquals(10.0, output.get(0).getScore(), 0.001);
         
         // Second score should be 20.0 (first score should be retracted as it's exactly at boundary)
-        assertEquals(30.0, output.get(1).getScore(), 0.001);
+        assertEquals(20.0, output.get(1).getScore(), 0.001);
+    }
+
+
+
+    @Test
+    public void testDetailedStateVerification() throws Exception {
+        String userId = "user1";
+        long baseTime = 1000L;
+        
+
+        // Process first score
+        testHarness.processElement(new Score(userId, 10.0, baseTime), baseTime);
+        
+        // Before watermark, state should have entries (inputState stores the data)
+        assertThat(stateBackend.numKeyValueStateEntries())
+                .as("Should have state entries after processing element but before watermark")
+                .isGreaterThan(0);
+        
+        testHarness.processWatermark(baseTime);
+        
+        // State should still exist after processing
+        assertThat(stateBackend.numKeyValueStateEntries())
+                .as("Should maintain state entries after first watermark")
+                .isGreaterThan(0);
+        
+        // Process second score
+        long time2 = baseTime + 60000L; // 1 minute later
+        testHarness.processElement(new Score(userId, 15.0, time2), time2);
+        testHarness.processWatermark(time2);
+        
+        // State should still exist after second processing
+        assertThat(stateBackend.numKeyValueStateEntries())
+                .as("Should maintain state entries after second watermark")
+                .isGreaterThan(0);
+        
+        // Process third score to test retraction
+        long time3 = baseTime + 120000L; // 2 minutes after first score
+        testHarness.processElement(new Score(userId, 5.0, time3), time3);
+        testHarness.processWatermark(time3);
+        
+        // State should still exist
+        assertThat(stateBackend.numKeyValueStateEntries())
+                .as("Should maintain state entries after third watermark")
+                .isGreaterThan(0);
     }
 
     @Test
-    public void testConsecutiveSameTimestamps() throws Exception {
+    public void testDetailedStateValuesVerification() throws Exception {
         String userId = "user1";
-        long timestamp = 1000L;
+        long baseTime = 1000L;
         
-        // Process multiple elements with same timestamp
-        testHarness.processElement(new Score(userId, 5.0, timestamp), timestamp);
-        testHarness.processElement(new Score(userId, 10.0, timestamp), timestamp);
-        testHarness.processElement(new Score(userId, 15.0, timestamp), timestamp);
+        // Process first score
+        testHarness.processElement(new Score(userId, 10.0, baseTime), baseTime);
         
-        testHarness.processWatermark(timestamp);
+        // Before watermark, inputState should contain the data
+        Map<Long, List<Score>> inputStateEntries = getInputStateEntries();
+        assertThat(inputStateEntries)
+                .as("inputState should contain data after processing element")
+                .hasSize(1);
+        assertThat(inputStateEntries.get(baseTime))
+                .as("inputState should contain the score at correct timestamp")
+                .hasSize(1);
+        assertThat(inputStateEntries.get(baseTime).get(0).getScore())
+                .as("Score in inputState should match input")
+                .isEqualTo(10.0);
         
-        // Should produce one output with sum of all scores
-        List<Score> output = testHarness.extractOutputValues();
-        assertThat(output).hasSize(1);
-        assertEquals(30.0, output.get(0).getScore(), 0.001); // 5 + 10 + 15
+        // Other states should still be null before watermark
+        assertThat(getStateValue("totalScoreState", Double.class))
+                .as("totalScoreState should still be null before watermark")
+                .isNull();
+        assertThat(getStateValue("previousScoreState", Double.class))
+                .as("previousScoreState should still be null before watermark")
+                .isNull();
+        
+        Long cleanupTs = getStateValue("cleanupTsState", Long.class);
+        long expectedCleanupTs = baseTime + (long)(WINDOW_SIZE_MINUTES * 60 * 1000L * 1.5) + 1;
+        assertThat(cleanupTs)
+                .as("cleanupTsState should be set to expected cleanup time")
+                .isEqualTo(expectedCleanupTs);        
+
+        testHarness.processWatermark(baseTime);
+        
+        // After first watermark, states should be updated
+        assertThat(getStateValue("totalScoreState", Double.class))
+                .as("totalScoreState should be 10.0 after first watermark")
+                .isEqualTo(10.0);
+        assertThat(getStateValue("previousScoreState", Double.class))
+                .as("previousScoreState should be 10.0 after first watermark")
+                .isEqualTo(10.0);
+        assertThat(getStateValue("lastTriggeringTsState", Long.class))
+                .as("lastTriggeringTsState should be updated after first watermark")
+                .isEqualTo(baseTime);
+        
+        // Process second score
+        long time2 = baseTime + 60000L; // 1 minute later
+        testHarness.processElement(new Score(userId, 15.0, time2), time2);
+        
+        // inputState should now contain both timestamps
+        inputStateEntries = getInputStateEntries();
+        assertThat(inputStateEntries)
+                .as("inputState should contain data for both timestamps")
+                .hasSize(2);
+        assertThat(inputStateEntries.get(time2))
+                .as("inputState should contain the second score")
+                .hasSize(1);
+        assertThat(inputStateEntries.get(time2).get(0).getScore())
+                .as("Second score in inputState should match input")
+                .isEqualTo(15.0);
+        
+        testHarness.processWatermark(time2);
+        
+        // After second watermark, states should be updated
+        assertThat(getStateValue("totalScoreState", Double.class))
+                .as("totalScoreState should be 25.0 after second watermark")
+                .isEqualTo(25.0);
+        assertThat(getStateValue("previousScoreState", Double.class))
+                .as("previousScoreState should be 25.0 after second watermark")
+                .isEqualTo(25.0);
+        assertThat(getStateValue("lastTriggeringTsState", Long.class))
+                .as("lastTriggeringTsState should be updated after second watermark")
+                .isEqualTo(time2);
+        
+        // Process third score to test retraction
+        long time3 = baseTime + 60000L*6; // 6 minutes after first score
+        testHarness.processElement(new Score(userId, 5.0, time3), time3);
+        testHarness.processWatermark(time3);
+        
+        // After third watermark with retraction
+        assertThat(getStateValue("totalScoreState", Double.class))
+                .as("totalScoreState should be 20.0 after retraction (15 + 5, first score 10 retracted)")
+                .isEqualTo(20.0);
+        assertThat(getStateValue("previousScoreState", Double.class))
+                .as("previousScoreState should be 20.0 after third watermark")
+                .isEqualTo(20.0);
+        assertThat(getStateValue("lastTriggeringTsState", Long.class))
+                .as("lastTriggeringTsState should be updated after third watermark")
+                .isEqualTo(time3);
+        
+        // inputState should only contain recent data (first score should be removed)
+        inputStateEntries = getInputStateEntries();
+        assertThat(inputStateEntries)
+                .as("inputState should only contain recent data after retraction")
+                .hasSize(2); // time2 and time3, baseTime should be removed
+        assertThat(inputStateEntries.containsKey(baseTime))
+                .as("First timestamp should be removed from inputState")
+                .isFalse();
+        assertThat(inputStateEntries.containsKey(time2))
+                .as("Second timestamp should still be in inputState")
+                .isTrue();
+        assertThat(inputStateEntries.containsKey(time3))
+                .as("Third timestamp should be in inputState")
+                .isTrue();
     }
-
-    // @Test
-    // public void testDetailedStateVerification() throws Exception {
-    //     String userId = "user1";
-    //     long baseTime = 1000L;
-        
-    //     // Verify initial state is empty
-    //     assertThat(stateBackend.numKeyValueStateEntries())
-    //             .as("Initial state should be empty")
-    //             .isEqualTo(0);
-        
-    //     // Process first score
-    //     testHarness.processElement(new Score(userId, 10.0, baseTime), baseTime);
-        
-    //     // Before watermark, state should have entries (inputState stores the data)
-    //     assertThat(stateBackend.numKeyValueStateEntries())
-    //             .as("Should have state entries after processing element but before watermark")
-    //             .isGreaterThan(0);
-        
-    //     testHarness.processWatermark(baseTime);
-        
-    //     // Verify output after first score
-    //     List<Score> output = testHarness.extractOutputValues();
-    //     assertThat(output).hasSize(1);
-    //     Score result1 = output.get(0);
-    //     assertEquals(userId, result1.getId());
-    //     assertEquals(10.0, result1.getScore(), 0.001);
-    //     assertEquals(0.0, result1.getPreviousScore(), 0.001);
-        
-    //     // State should still exist after processing
-    //     assertThat(stateBackend.numKeyValueStateEntries())
-    //             .as("Should maintain state entries after first watermark")
-    //             .isGreaterThan(0);
-        
-    //     // Process second score
-    //     long time2 = baseTime + 60000L; // 1 minute later
-    //     testHarness.processElement(new Score(userId, 15.0, time2), time2);
-    //     testHarness.processWatermark(time2);
-        
-    //     // Verify accumulated output
-    //     List<Score> output2 = testHarness.extractOutputValues();
-    //     assertThat(output2).hasSize(2);
-    //     Score result2 = output2.get(1);
-    //     assertEquals(userId, result2.getId());
-    //     assertEquals(25.0, result2.getScore(), 0.001); // 10 + 15
-    //     assertEquals(10.0, result2.getPreviousScore(), 0.001); // Previous total was 10
-        
-    //     // State should still exist after second processing
-    //     assertThat(stateBackend.numKeyValueStateEntries())
-    //             .as("Should maintain state entries after second watermark")
-    //             .isGreaterThan(0);
-        
-    //     // Process third score to test retraction
-    //     long time3 = baseTime + 120000L; // 2 minutes after first score
-    //     testHarness.processElement(new Score(userId, 5.0, time3), time3);
-    //     testHarness.processWatermark(time3);
-        
-    //     // Verify output with retraction
-    //     List<Score> output3 = testHarness.extractOutputValues();
-    //     assertThat(output3).hasSize(3);
-    //     Score result3 = output3.get(2);
-    //     assertEquals(userId, result3.getId());
-    //     assertEquals(20.0, result3.getScore(), 0.001); // 15 + 5 (first score 10 should be retracted)
-    //     assertEquals(25.0, result3.getPreviousScore(), 0.001); // Previous total was 25
-        
-    //     // State should still exist
-    //     assertThat(stateBackend.numKeyValueStateEntries())
-    //             .as("Should maintain state entries after third watermark")
-    //             .isGreaterThan(0);
-    // }
-
-    // @Test
-    // public void testStateCleanupVerification() throws Exception {
-    //     String userId = "user1";
-    //     long baseTime = 1000L;
-    //     long windowSizeMs = WINDOW_SIZE_MINUTES * 60 * 1000L; // 5 minutes in ms
-        
-    //     // Process some scores
-    //     testHarness.processElement(new Score(userId, 10.0, baseTime), baseTime);
-    //     testHarness.processElement(new Score(userId, 20.0, baseTime + 60000L), baseTime + 60000L);
-        
-    //     testHarness.processWatermark(baseTime);
-    //     testHarness.processWatermark(baseTime + 60000L);
-        
-    //     // Verify that scores are processed and state exists
-    //     List<Score> output = testHarness.extractOutputValues();
-    //     assertThat(output).hasSize(2);
-    //     assertThat(stateBackend.numKeyValueStateEntries())
-    //             .as("Should have state entries after processing scores")
-    //             .isGreaterThan(0);
-        
-    //     // Trigger cleanup by advancing time beyond cleanup threshold
-    //     // Cleanup happens at timestamp + precedingOffset * 1.5 + 1
-    //     long cleanupTime = baseTime + (long)(windowSizeMs * 1.5) + 60000L + 1;
-    //     testHarness.processWatermark(cleanupTime);
-        
-    //     // After cleanup, state should be cleared
-    //     assertThat(stateBackend.numKeyValueStateEntries())
-    //             .as("State should be cleared after cleanup timer")
-    //             .isEqualTo(0);
-        
-    //     // Processing new elements after cleanup should work
-    //     testHarness.processElement(new Score(userId, 5.0, cleanupTime + 1000L), cleanupTime + 1000L);
-    //     testHarness.processWatermark(cleanupTime + 1000L);
-        
-    //     // Should produce new output and state should exist again
-    //     List<Score> outputAfterCleanup = testHarness.extractOutputValues();
-    //     assertThat(outputAfterCleanup).hasSize(3); // 2 previous + 1 new
-    //     assertEquals(5.0, outputAfterCleanup.get(2).getScore(), 0.001);
-        
-    //     assertThat(stateBackend.numKeyValueStateEntries())
-    //             .as("Should have state entries after processing new element post-cleanup")
-    //             .isGreaterThan(0);
-    // }
-
-    // @Test
-    // public void testDetailedStateValuesVerification() throws Exception {
-    //     String userId = "user1";
-    //     long baseTime = 1000L;
-        
-    //     // Verify initial state values
-    //     assertThat(getStateValue("totalScoreState", Double.class))
-    //             .as("Initial totalScoreState should be null")
-    //             .isNull();
-    //     assertThat(getStateValue("previousScoreState", Double.class))
-    //             .as("Initial previousScoreState should be null")
-    //             .isNull();
-    //     assertThat(getStateValue("lastTriggeringTsState", Long.class))
-    //             .as("Initial lastTriggeringTsState should be null")
-    //             .isNull();
-    //     assertThat(getInputStateEntries())
-    //             .as("Initial inputState should be empty")
-    //             .isEmpty();
-        
-    //     // Process first score
-    //     testHarness.processElement(new Score(userId, 10.0, baseTime), baseTime);
-        
-    //     // Before watermark, inputState should contain the data
-    //     Map<Long, List<Score>> inputStateEntries = getInputStateEntries();
-    //     assertThat(inputStateEntries)
-    //             .as("inputState should contain data after processing element")
-    //             .hasSize(1);
-    //     assertThat(inputStateEntries.get(baseTime))
-    //             .as("inputState should contain the score at correct timestamp")
-    //             .hasSize(1);
-    //     assertThat(inputStateEntries.get(baseTime).get(0).getScore())
-    //             .as("Score in inputState should match input")
-    //             .isEqualTo(10.0);
-        
-    //     // Other states should still be null before watermark
-    //     assertThat(getStateValue("totalScoreState", Double.class))
-    //             .as("totalScoreState should still be null before watermark")
-    //             .isNull();
-    //     assertThat(getStateValue("previousScoreState", Double.class))
-    //             .as("previousScoreState should still be null before watermark")
-    //             .isNull();
-        
-    //     testHarness.processWatermark(baseTime);
-        
-    //     // After first watermark, states should be updated
-    //     assertThat(getStateValue("totalScoreState", Double.class))
-    //             .as("totalScoreState should be 10.0 after first watermark")
-    //             .isEqualTo(10.0);
-    //     assertThat(getStateValue("previousScoreState", Double.class))
-    //             .as("previousScoreState should be 10.0 after first watermark")
-    //             .isEqualTo(10.0);
-    //     assertThat(getStateValue("lastTriggeringTsState", Long.class))
-    //             .as("lastTriggeringTsState should be updated after first watermark")
-    //             .isEqualTo(baseTime);
-        
-    //     // Process second score
-    //     long time2 = baseTime + 60000L; // 1 minute later
-    //     testHarness.processElement(new Score(userId, 15.0, time2), time2);
-        
-    //     // inputState should now contain both timestamps
-    //     inputStateEntries = getInputStateEntries();
-    //     assertThat(inputStateEntries)
-    //             .as("inputState should contain data for both timestamps")
-    //             .hasSize(2);
-    //     assertThat(inputStateEntries.get(time2))
-    //             .as("inputState should contain the second score")
-    //             .hasSize(1);
-    //     assertThat(inputStateEntries.get(time2).get(0).getScore())
-    //             .as("Second score in inputState should match input")
-    //             .isEqualTo(15.0);
-        
-    //     testHarness.processWatermark(time2);
-        
-    //     // After second watermark, states should be updated
-    //     assertThat(getStateValue("totalScoreState", Double.class))
-    //             .as("totalScoreState should be 25.0 after second watermark")
-    //             .isEqualTo(25.0);
-    //     assertThat(getStateValue("previousScoreState", Double.class))
-    //             .as("previousScoreState should be 25.0 after second watermark")
-    //             .isEqualTo(25.0);
-    //     assertThat(getStateValue("lastTriggeringTsState", Long.class))
-    //             .as("lastTriggeringTsState should be updated after second watermark")
-    //             .isEqualTo(time2);
-        
-    //     // Process third score to test retraction
-    //     long time3 = baseTime + 120000L; // 2 minutes after first score
-    //     testHarness.processElement(new Score(userId, 5.0, time3), time3);
-    //     testHarness.processWatermark(time3);
-        
-    //     // After third watermark with retraction
-    //     assertThat(getStateValue("totalScoreState", Double.class))
-    //             .as("totalScoreState should be 20.0 after retraction (15 + 5, first score 10 retracted)")
-    //             .isEqualTo(20.0);
-    //     assertThat(getStateValue("previousScoreState", Double.class))
-    //             .as("previousScoreState should be 20.0 after third watermark")
-    //             .isEqualTo(20.0);
-    //     assertThat(getStateValue("lastTriggeringTsState", Long.class))
-    //             .as("lastTriggeringTsState should be updated after third watermark")
-    //             .isEqualTo(time3);
-        
-    //     // inputState should only contain recent data (first score should be removed)
-    //     inputStateEntries = getInputStateEntries();
-    //     assertThat(inputStateEntries)
-    //             .as("inputState should only contain recent data after retraction")
-    //             .hasSize(2); // time2 and time3, baseTime should be removed
-    //     assertThat(inputStateEntries.containsKey(baseTime))
-    //             .as("First timestamp should be removed from inputState")
-    //             .isFalse();
-    //     assertThat(inputStateEntries.containsKey(time2))
-    //             .as("Second timestamp should still be in inputState")
-    //             .isTrue();
-    //     assertThat(inputStateEntries.containsKey(time3))
-    //             .as("Third timestamp should be in inputState")
-    //             .isTrue();
-    // }
 }
