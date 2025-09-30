@@ -57,6 +57,8 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
 
     // Comparator for scores (descending order - higher scores first)
     private static final Comparator<Double> SCORE_COMPARATOR = Collections.reverseOrder();
+
+    private transient ValueState<Long> lastCleanupTime;
     
     // Helper methods for rank checking
     private boolean isInRankEnd(long rank) {
@@ -105,6 +107,10 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         timerDescriptor.enableTimeToLive(ttlConfig);
         timerRegistered = getRuntimeContext().getState(timerDescriptor);
 
+        ValueStateDescriptor<Long> lastCleanupDesc =
+        new ValueStateDescriptor<>("last-cleanup-time", Types.LONG);
+        lastCleanupTime = getRuntimeContext().getState(lastCleanupDesc);
+
     }
     
     @Override
@@ -117,7 +123,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         // trường hợp này khó xảy ra trong context streaming realtime
 
         // Register cleanup timer if not already registered
-        registerCleanupTimer(ctx);
+        registerCleanupTimer(ctx, out);
 
         SortedMap<Double, Long> currentTreeMap = treeMap.value();
         if (currentTreeMap == null) {
@@ -357,15 +363,17 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     /**
      * Register cleanup timer if not already registered
      */
-    private void registerCleanupTimer(KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context ctx) throws Exception {
+    private void registerCleanupTimer(KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context ctx, Collector<ScoreChangeEvent> out) throws Exception {
         Boolean registered = timerRegistered.value();
-        
+
         if (registered == null || !registered) {
             // First time - register timer for next cleanup
             long currentTime = ctx.timestamp();
-            long nextCleanupTime = currentTime + cleanupIntervalMs;
+            long nextCleanupTime = currentTime + cleanupIntervalMs*2;
             ctx.timerService().registerEventTimeTimer(nextCleanupTime);
             timerRegistered.update(true);
+            lastCleanupTime.update(nextCleanupTime);
+            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETEALL));
         }
     }
     
@@ -388,7 +396,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
      * Removes entries that are older than TTL and emits appropriate change events
      */
     private void cleanupExpiredEntries(long currentTime, Collector<ScoreChangeEvent> out) throws Exception {
-        long expirationTime = currentTime - (ttlMinutes * 60 * 1000L);
+        long expirationTime = currentTime - cleanupIntervalMs;
         SortedMap<Double, Long> currentTreeMap = treeMap.value();
         if (currentTreeMap == null) {
             currentTreeMap = new TreeMap<>(SCORE_COMPARATOR);
@@ -421,9 +429,12 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             // If retractRecord didn't remove from dataState, do manual removal
             if (!stateRemoved) {
                 stateRemoved = removeUserFromDataState(userId, scoreValue);
-            }else if(retractContext.insertFromRetract != null){
+            }else {
                 out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETE, retractContext.deleteFromRetract));
-                out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, retractContext.insertFromRetract));
+                if(retractContext.insertFromRetract != null){
+                    out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.INSERT, retractContext.insertFromRetract));
+                }
+               
             }
             
             // If stateRemoved is true, update treeMap
@@ -461,6 +472,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         // Register next cleanup timer
         long nextCleanupTime = timestamp + cleanupIntervalMs;
         ctx.timerService().registerEventTimeTimer(nextCleanupTime);
+        lastCleanupTime.update(nextCleanupTime);
     
         
         LOG.debug("Cleanup timer fired at timestamp: {}, next cleanup at: {}", timestamp, nextCleanupTime);

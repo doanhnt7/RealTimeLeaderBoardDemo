@@ -78,7 +78,7 @@ public class ScoreChangeEventSink implements Sink<ScoreChangeEvent> {
                 }
             }
 
-            if (changeEvent == null || changeEvent.getScore() == null) {
+            if (changeEvent == null) {
                 LOG.warn("Received null change event or score, skipping");
                 return;
             }
@@ -104,6 +104,11 @@ public class ScoreChangeEventSink implements Sink<ScoreChangeEvent> {
                     } else {
                         LOG.warn("DELETE: User {} was not found in Redis key '{}'", userId, redisKey);
                     }
+                }
+                else if (changeEvent.isDeleteAll()) {
+                    // DELETEALL: Remove all scores from the sorted set
+                    jedis.zremrangeByRank(redisKey, 0, -1);
+                    LOG.debug("DELETEALL: Removed all scores from Redis key '{}'", redisKey);
                 }
                 // Append only the change event string to the TXT file
                 if (fileWriter != null) {

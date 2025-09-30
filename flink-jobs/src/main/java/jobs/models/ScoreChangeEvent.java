@@ -11,7 +11,8 @@ public class ScoreChangeEvent implements Serializable {
     
     public enum ChangeType {
         INSERT,  // Add this score to the ranking
-        DELETE   // Remove this score from the ranking
+        DELETE,   // Remove this score from the ranking
+        DELETEALL, // Remove all scores from the ranking
     }
     
     private final ChangeType changeType;
@@ -21,6 +22,11 @@ public class ScoreChangeEvent implements Serializable {
         this.changeType = changeType;
         this.score = score;
     }
+    public ScoreChangeEvent(ChangeType changeType) {
+        this.changeType = changeType;
+        this.score = null;
+    }
+
     
     public ChangeType getChangeType() {
         return changeType;
@@ -36,6 +42,10 @@ public class ScoreChangeEvent implements Serializable {
     
     public boolean isDelete() {
         return changeType == ChangeType.DELETE;
+    }
+    
+    public boolean isDeleteAll() {
+        return changeType == ChangeType.DELETEALL;
     }
     
     @Override
