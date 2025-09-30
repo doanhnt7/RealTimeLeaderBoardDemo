@@ -113,6 +113,9 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context ctx,
             Collector<ScoreChangeEvent> out) throws Exception {
         
+        // Nếu có trường hợp 1 user nào có submit score từ 1 timestamp rất lâu trong quá khứ thì cần check để xử lí, tuy nhiên trường hợp này rất hiếm khi xảy ra, và dù có cũng sẽ được cleanup sau 5phhut
+        // trường hợp này khó xảy ra trong context streaming realtime
+
         // Register cleanup timer if not already registered
         registerCleanupTimer(ctx);
 
