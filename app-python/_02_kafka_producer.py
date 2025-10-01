@@ -128,6 +128,24 @@ class KafkaManager:
         except Exception as e:
             logger.error("Failed to send message to Kafka", error=str(e))
             raise
+
+    def send_message_bytes(self, topic: str, key: bytes, value: bytes):
+        """Send a message where key/value are already bytes (avoids re-serialization)."""
+        try:
+            if not self.producer:
+                self._initialize_producer()
+            self.producer.produce(topic, key=key, value=value, on_delivery=self._delivery_report)
+            self._maybe_poll()
+        except BufferError as e:
+            logger.warning("Producer queue full, polling to drain", error=str(e))
+            self._maybe_poll(force=True)
+            self.producer.produce(topic, key=key, value=value, on_delivery=self._delivery_report)
+        except KafkaException as e:
+            logger.error("Kafka exception while sending message", error=str(e))
+            raise
+        except Exception as e:
+            logger.error("Failed to send message bytes to Kafka", error=str(e))
+            raise
     
     def flush(self):
         if self.producer:

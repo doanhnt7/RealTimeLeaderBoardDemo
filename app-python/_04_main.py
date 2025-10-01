@@ -11,6 +11,9 @@ import json
 from datetime import datetime, timezone
 import structlog
 import pandas as pd
+import time
+import orjson
+import pyarrow.parquet as pq
 
 from _03_realtime_producer import RealtimeDataProducer
 from _02_kafka_producer import KafkaManager
@@ -267,70 +270,62 @@ async def replay_parquet_to_kafka(input_path: str, rate: int, kafka_servers: str
     
     # Initialize Kafka manager
     kafka_manager = KafkaManager(bootstrap_servers=kafka_servers)
+
     
     try:
         # Ensure topic exists
         kafka_manager.ensure_topic(kafka_topic, num_partitions=4, replication_factor=1)
         
-        # Read parquet file
+        # Read parquet file via PyArrow for faster iteration
         logger.info("Reading Parquet file...")
-        df = pd.read_parquet(input_path)
-        logger.info("Parquet file loaded", records=len(df))
+        table = pq.read_table(input_path)
+        total_records = table.num_rows
+        logger.info("Parquet file loaded", records=total_records)
         
         # Calculate interval between messages
         interval = 1.0 / rate if rate > 0 else 1.0
         
-        sent = 0
-        total_records = len(df)
+        sent_count = 0
+        start_perf = time.perf_counter()
+        start_time_iso = datetime.now(timezone.utc).isoformat()
         
-        # Process each row
-        for index, row in df.iterrows():
-            try:
-                # Convert pandas row to dict and handle numpy types
-                doc = row.to_dict()
-                
-                # Convert numpy types to Python types for JSON serialization
-                # With explicit schema, data types should be more consistent
-                for key, value in doc.items():
-                    if pd.isna(value):
-                        doc[key] = None
-                    elif hasattr(value, 'item') and hasattr(value, 'size') and value.size == 1:
-                        # numpy scalar
-                        doc[key] = value.item()
-                    elif hasattr(value, 'tolist'):
-                        # numpy array or list
-                        doc[key] = value.tolist()
-                    else:
-                        # Keep as is (should be Python native types with explicit schema)
-                        doc[key] = value
-                
-                # Send to Kafka
-                kafka_manager.send_message(doc, kafka_topic)
-                sent += 1
-                
-                # Log progress
-                if sent % 100 == 0:
-                    logger.info("Sent records to Kafka", 
-                               sent=sent, 
-                               total=total_records, 
-                               progress=f"{(sent/total_records)*100:.1f}%")
-                
-                # Rate limiting
-                if rate > 0:
-                    await asyncio.sleep(interval)
-                    
-            except Exception as e:
-                logger.error("Failed to process record", 
-                           record_index=index, 
-                           error=str(e))
-                continue
+        # Process each row in batches while preserving single-thread order
+        batch_size = 10000
+        batch_index = 0
+        for batch in table.to_batches(max_chunksize=batch_size):
+            rows = batch.to_pylist()  # list[dict] with native Python types
+            for doc in rows:
+                try:
+                    key_bytes = (doc.get('uid') or '').encode('utf-8')
+                    value_bytes = orjson.dumps(doc)
+                    kafka_manager.send_message_bytes(topic=kafka_topic, key=key_bytes, value=value_bytes)
+                    sent_count += 1
+                    if rate > 0:
+                        await asyncio.sleep(interval)
+                except Exception as e:
+                    logger.error("Failed to process record", record_index=sent_count, error=str(e))
+                    continue
+            batch_index += 1
         
         # Flush remaining messages
         kafka_manager.flush()
+
+        end_perf = time.perf_counter()
+        end_time_iso = datetime.now(timezone.utc).isoformat()
+        duration_seconds = max(end_perf - start_perf, 1e-9)
+        avg_msgs_per_sec = sent_count / duration_seconds
+
+        logger.info(
+            "Replay to Kafka completed",
+            total_records=total_records,
+            sent_records=sent_count,
+            start_time=start_time_iso,
+            end_time=end_time_iso,
+            duration_seconds=f"{duration_seconds:.3f}",
+            average_msgs_per_sec=f"{avg_msgs_per_sec:.2f}"
+        )
         
-        logger.info("Parquet replay to Kafka finished", 
-                   total_records=sent,
-                   kafka_topic=kafka_topic)
+    
                    
     except Exception as e:
         logger.error("Failed to replay parquet to Kafka", error=str(e))
@@ -416,7 +411,7 @@ async def main():
             if args.mongo_collection:
                 config.MONGO_COLLECTION = args.mongo_collection
             await start_producer(
-                rate=(args.rate or config.SLEEP_RATE),
+                rate = args.rate if args.rate is not None else config.SLEEP_RATE,
                 num_user=args.num_user or config.NUM_USER,
                 num_app=args.num_app or config.NUM_APP,
             )
@@ -444,7 +439,7 @@ async def main():
                 config.MONGO_COLLECTION = args.mongo_collection
             await replay_json_file(
                 input_path=args.input,
-                rate=(args.rate or config.SLEEP_RATE),
+                rate = args.rate if args.rate is not None else config.SLEEP_RATE,
             )
         elif args.command == 'replay-parquet-kafka':
             # Override config with CLI if provided
@@ -452,7 +447,7 @@ async def main():
             kafka_topic = args.kafka_topic or config.KAFKA_TOPIC
             await replay_parquet_to_kafka(
                 input_path=args.input,
-                rate=(args.rate or config.SLEEP_RATE),
+                rate = args.rate if args.rate is not None else config.SLEEP_RATE,
                 kafka_servers=kafka_servers,
                 kafka_topic=kafka_topic,
             )
