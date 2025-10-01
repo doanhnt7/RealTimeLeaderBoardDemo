@@ -61,6 +61,25 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    hostname: kafka-exporter
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "9308:9308"
+    command:
+      - --kafka.server=kafka:29092
+     
+      - --web.listen-address=0.0.0.0:9308
+      # uncomment if SASL/TLS is needed and configure accordingly
+      # - --sasl.enabled
+      # - --sasl.username=...
+      # - --sasl.password=...
+    restart: unless-stopped
+
   jobmanager:
     build:
       context: ./flink
@@ -94,6 +113,7 @@ services:
       - jobmanager
     volumes:
       - ../flink-jobs/result:/opt/flink/jobs
+      - ../flink-jobs/src/main/resources/config.yaml:/opt/flink/conf/config.yaml
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -114,6 +134,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource,redis-datasource
       GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: grafana-clickhouse-datasource
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
