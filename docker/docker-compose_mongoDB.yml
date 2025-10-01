@@ -1,4 +1,27 @@
 services:
+  mongo:
+    image: mongo:6.0
+    container_name: mongo
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  mongo-init-replica:
+    image: mongo:6.0
+    container_name: mongo-init-replica
+    depends_on:
+      mongo:
+        condition: service_healthy
+    entrypoint: ["sh", "-c", "mongosh --host mongo:27017 --quiet --eval 'rs.initiate({_id: \"rs0\", members: [{ _id: 0, host: \"mongo:27017\" }]})' || true"]
+    restart: "no"
+
   redis:
     image: redis:7-alpine
     container_name: redis
@@ -42,6 +65,34 @@ services:
       timeout: 5s
       retries: 5
 
+  kafka-connect:
+    image: debezium/connect:2.5
+    container_name: kafka-connect
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-status
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      REST_ADVERTISED_HOST_NAME: kafka-connect
+      REST_ADVERTISED_PORT: 8083
+      ENABLE_DEBEZIUM_SCRIPTING: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+  
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     hostname: kafka-ui
@@ -119,14 +170,45 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     restart: unless-stopped
 
+  connect-init:
+    image: curlimages/curl:8.6.0
+    container_name: connect-init
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      mongo-init-replica:
+        condition: service_completed_successfully
+    volumes:
+      - ./debezium-mongo-connector.json:/tmp/connector.json:ro
+    entrypoint: ["sh", "-c", "set -e; \
+      echo 'Waiting for Kafka Connect...'; \
+      until curl -fs http://kafka-connect:8083/connectors > /dev/null; do sleep 2; done; \
+      echo 'Registering Debezium connector...'; \
+      (curl -fs -X POST http://kafka-connect:8083/connectors -H 'Content-Type: application/json' --data @/tmp/connector.json \
+        || curl -fs -X PUT http://kafka-connect:8083/connectors/mongo-leaderboard-connector/config -H 'Content-Type: application/json' --data @/tmp/connector.json); \
+      echo 'Waiting for connector and task to be RUNNING...'; \
+      until [ $(curl -fs http://kafka-connect:8083/connectors/mongo-leaderboard-connector/status | grep -o '\"state\":\"RUNNING\"' | wc -l) -ge 2 ]; do \
+        sleep 2; \
+      done; \
+      echo 'Connector is RUNNING.'"]
+    restart: "no"
+
   data-generator:
     build:
       context: ../app-python
       dockerfile: Dockerfile
     hostname: data-generator
     depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init-replica:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
+      connect-init:
+        condition: service_completed_successfully
     environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: leaderboard
@@ -136,7 +218,7 @@ services:
     volumes:
       - ../app-python:/app
     working_dir: /app
-    command: ["python", "_04_main.py", "replay-parquet-kafka"]
+    command: ["python", "_04_main.py", "replay-json"]
     # command: ["python", "_04_main.py", "start-producer"]
     # restart: unless-stopped
     healthcheck:
@@ -145,6 +227,18 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  # zeppelin:
+  #   image: apache/zeppelin:0.11.0
+  #   container_name: zeppelin
+  #   ports:
+  #     - "8082:8080"
+  #   environment:
+  #     ZEPPELIN_ADDR: 0.0.0.0
+  #   # volumes:
+  #   #   - ./zeppelin/notebook:/zeppelin/notebook
+  #   #   - ./zeppelin/conf:/zeppelin/conf
+  #   restart: unless-stopped
 
 # volumes:
 #   # Named volumes not required; using project-local bind mounts above

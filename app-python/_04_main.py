@@ -10,8 +10,10 @@ import os
 import json
 from datetime import datetime, timezone
 import structlog
+import pandas as pd
 
 from _03_realtime_producer import RealtimeDataProducer
+from _02_kafka_producer import KafkaManager
 from _00_config import config
 
 
@@ -130,6 +132,44 @@ async def generate_parquet_file(count: int, output_path: str, num_user: int, num
         num_app=num_app,
     ).data_generator
     
+    # Define explicit schema for consistent data types
+    schema = pa.schema([
+        ('uid', pa.string()),
+        ('email', pa.string()),
+        ('authProvider', pa.string()),
+        ('appId', pa.string()),
+        ('avatar', pa.string()),
+        ('geo', pa.string()),
+        ('role', pa.string()),
+        ('lastLoginAt', pa.string()),
+        ('name', pa.string()),
+        ('devices', pa.list_(pa.struct([
+            ('fb_analytics_instance_id', pa.string()),
+            ('fb_instance_id', pa.string()),
+            ('fcmToken', pa.string())
+        ]))),
+        ('resources', pa.list_(pa.string())),
+        ('created_at', pa.string()),
+        ('updated_at', pa.string()),
+        ('level', pa.int64()),
+        ('previousLevel', pa.int64()),
+        ('updatedAt', pa.string()),
+        ('team', pa.int64())
+    ])
+    
+    def normalize_for_parquet(doc):
+        """Normalize data structure for consistent parquet storage"""
+        normalized = {}
+        for key, value in doc.items():
+            if key in ['devices', 'resources']:
+                # Ensure these are always lists
+                normalized[key] = list(value) if value else []
+            elif isinstance(value, datetime):
+                normalized[key] = value.astimezone(timezone.utc).isoformat()
+            else:
+                normalized[key] = value
+        return normalized
+    
     # Generate data in batches for memory efficiency
     batch_size = 10000
     total_batches = (count + batch_size - 1) // batch_size
@@ -144,32 +184,32 @@ async def generate_parquet_file(count: int, output_path: str, num_user: int, num
         
         for _ in range(batch_count):
             doc = gen.generate_user_submission()
-            # Convert to serializable format
-            serializable_doc = _serialize_doc_for_json(doc)
-            batch_data.append(serializable_doc)
+            # Normalize data structure for consistent parquet storage
+            normalized_doc = normalize_for_parquet(doc)
+            batch_data.append(normalized_doc)
         
         all_data.extend(batch_data)
         
         if (batch_num + 1) % 10 == 0:  # Log every 10 batches
             logger.info(f"Generated batch {batch_num + 1}/{total_batches}")
     
-    # Create DataFrame and write as Parquet
-    logger.info("Creating DataFrame and writing Parquet...")
+    # Create DataFrame and write as Parquet with explicit schema
+    logger.info("Creating DataFrame and writing Parquet with explicit schema...")
     df = pd.DataFrame(all_data)
     
-    # Write with compression for better performance
-    df.to_parquet(
-        output_path, 
-        index=False,
-        compression='snappy',  # Fast compression
-        engine='pyarrow'
-    )
+    # Convert to PyArrow table with explicit schema
+    table = pa.Table.from_pandas(df, schema=schema)
     
-    # Get file size for logging
-    import os
+    # Write with compression for better performance
+    pq.write_table(
+        table,
+        output_path,
+        compression='snappy',  # Fast compression
+        use_deprecated_int96_timestamps=False
+    )
     file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
     
-    logger.info("Parquet dataset written", 
+    logger.info("Parquet dataset written with explicit schema", 
                 path=output_path, 
                 records=len(all_data),
                 file_size_mb=f"{file_size_mb:.2f}MB")
@@ -210,6 +250,94 @@ async def replay_json_file(input_path: str, rate: int):
         logger.info("Replay finished", total_records=sent)
     finally:
         producer.stop()
+
+
+async def replay_parquet_to_kafka(input_path: str, rate: int, kafka_servers: str, kafka_topic: str):
+    """Replay records from a Parquet file into Kafka at given rate"""
+    logger = structlog.get_logger()
+    
+    if not os.path.isfile(input_path):
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+    
+    logger.info("Replaying Parquet into Kafka", 
+                path=input_path, 
+                rate=rate, 
+                kafka_servers=kafka_servers, 
+                kafka_topic=kafka_topic)
+    
+    # Initialize Kafka manager
+    kafka_manager = KafkaManager(bootstrap_servers=kafka_servers)
+    
+    try:
+        # Ensure topic exists
+        kafka_manager.ensure_topic(kafka_topic, num_partitions=4, replication_factor=1)
+        
+        # Read parquet file
+        logger.info("Reading Parquet file...")
+        df = pd.read_parquet(input_path)
+        logger.info("Parquet file loaded", records=len(df))
+        
+        # Calculate interval between messages
+        interval = 1.0 / rate if rate > 0 else 1.0
+        
+        sent = 0
+        total_records = len(df)
+        
+        # Process each row
+        for index, row in df.iterrows():
+            try:
+                # Convert pandas row to dict and handle numpy types
+                doc = row.to_dict()
+                
+                # Convert numpy types to Python types for JSON serialization
+                # With explicit schema, data types should be more consistent
+                for key, value in doc.items():
+                    if pd.isna(value):
+                        doc[key] = None
+                    elif hasattr(value, 'item') and hasattr(value, 'size') and value.size == 1:
+                        # numpy scalar
+                        doc[key] = value.item()
+                    elif hasattr(value, 'tolist'):
+                        # numpy array or list
+                        doc[key] = value.tolist()
+                    else:
+                        # Keep as is (should be Python native types with explicit schema)
+                        doc[key] = value
+                
+                # Send to Kafka
+                kafka_manager.send_message(doc, kafka_topic)
+                sent += 1
+                
+                # Log progress
+                if sent % 100 == 0:
+                    logger.info("Sent records to Kafka", 
+                               sent=sent, 
+                               total=total_records, 
+                               progress=f"{(sent/total_records)*100:.1f}%")
+                
+                # Rate limiting
+                if rate > 0:
+                    await asyncio.sleep(interval)
+                    
+            except Exception as e:
+                logger.error("Failed to process record", 
+                           record_index=index, 
+                           error=str(e))
+                continue
+        
+        # Flush remaining messages
+        kafka_manager.flush()
+        
+        logger.info("Parquet replay to Kafka finished", 
+                   total_records=sent,
+                   kafka_topic=kafka_topic)
+                   
+    except Exception as e:
+        logger.error("Failed to replay parquet to Kafka", error=str(e))
+        raise
+    finally:
+        kafka_manager.close()
+
 
 def create_parser():
     """Create command line argument parser"""
@@ -254,6 +382,13 @@ def create_parser():
     replay_parser.add_argument('--mongo-uri', type=str, help='MongoDB connection string')
     replay_parser.add_argument('--mongo-db', type=str, help='MongoDB database name')
     replay_parser.add_argument('--mongo-collection', type=str, help='MongoDB collection name')
+
+    # Replay Parquet into Kafka at a rate
+    replay_kafka_parser = subparsers.add_parser('replay-parquet-kafka', help='Replay records from a Parquet file into Kafka at given rate')
+    replay_kafka_parser.add_argument('--input', type=str, default='fixed-dataset.parquet', help='Input Parquet path')
+    replay_kafka_parser.add_argument('--rate', type=int, help='Events per second')
+    replay_kafka_parser.add_argument('--kafka-servers', type=str, help='Kafka bootstrap servers')
+    replay_kafka_parser.add_argument('--kafka-topic', type=str, help='Kafka topic name')
 
     return parser
 
@@ -310,6 +445,16 @@ async def main():
             await replay_json_file(
                 input_path=args.input,
                 rate=(args.rate or config.SLEEP_RATE),
+            )
+        elif args.command == 'replay-parquet-kafka':
+            # Override config with CLI if provided
+            kafka_servers = args.kafka_servers or config.KAFKA_BOOTSTRAP_SERVERS
+            kafka_topic = args.kafka_topic or config.KAFKA_TOPIC
+            await replay_parquet_to_kafka(
+                input_path=args.input,
+                rate=(args.rate or config.SLEEP_RATE),
+                kafka_servers=kafka_servers,
+                kafka_topic=kafka_topic,
             )
         else:
             parser.print_help()

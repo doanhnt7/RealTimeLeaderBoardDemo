@@ -14,3 +14,4 @@ confluent-kafka
 lz4
 pymongo
 redis==5.0.1
+pyarrow

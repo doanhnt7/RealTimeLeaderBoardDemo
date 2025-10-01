@@ -97,8 +97,9 @@ class UserDataGenerator:
         
         weights = [10 - i for i in range(10)]  # [10,9,8,...,1]
         increase = random.choices(range(1, 11), weights=weights, k=1)[0]
-        self._user_levels[uid] += increase
         
+        prev_level = self._user_levels[uid]
+        self._user_levels[uid] += increase
         # Use native datetime (stored as BSON Date in MongoDB)
         created_dt = now
         updated_dt = now
@@ -121,6 +122,7 @@ class UserDataGenerator:
             "created_at": created_dt,
             "updated_at": updated_dt,
             "level": self._user_levels[uid],
+            "previousLevel": prev_level,
             "updatedAt": updated_dt,
             "team": base["team"],
         }

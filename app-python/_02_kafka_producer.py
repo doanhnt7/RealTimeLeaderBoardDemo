@@ -114,7 +114,7 @@ class KafkaManager:
         try:
             if not self.producer:
                 self._initialize_producer()
-            key = (payload.get('uid') or payload.get('_id') or '').encode('utf-8')
+            key = (payload.get('uid') or "").encode('utf-8')
             value_bytes = json.dumps(payload, default=str).encode('utf-8')
             self.producer.produce(topic, key=key, value=value_bytes, on_delivery=self._delivery_report)
             self._maybe_poll()

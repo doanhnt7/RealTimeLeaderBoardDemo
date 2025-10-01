@@ -24,6 +24,10 @@ class Config:
     REDIS_DB = 0
     REDIS_PASSWORD = ''
     
+    # Kafka settings
+    KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:29092')
+    KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'user_submissions')
+    
     # Logging
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
