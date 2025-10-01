@@ -44,7 +44,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     
     private final int topN;
     private final long cleanupIntervalMs;
-    private final long snapshotIntervalMs = 7 * 60 * 1000L; // 7 minutes
+    private final long snapshotIntervalMs =  6 * 1000L; // 6 seconds
     private final long ttlMinutes;
     
     // State to store mapping from score value to list of users with that score
