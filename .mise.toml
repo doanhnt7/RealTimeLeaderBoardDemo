@@ -32,3 +32,24 @@ run = "docker compose -f docker/docker-compose.yml exec -it jobmanager flink run
 [tasks."flink:test"]
 description = "Run Flink tests"
 run = "cd flink-jobs && mvn test"
+
+[tasks."spark:run"]
+description = "Run Spark leaderboard processor on cluster"
+depends = ["docker-up"]
+run = """
+docker compose -f docker/docker-compose.yml exec -it spark-master `
+  spark-submit `
+  --master spark://spark-master:7077 `
+  /opt/spark/jobs/leaderboard_processor.py `
+  /opt/spark/jobs/fixed-dataset.parquet `
+  /opt/spark/jobs/output/leaderboard_snapshots `
+  --window-size 5 `
+  --top-n 10 `
+  --ttl 30 `
+  --snapshot-interval 7
+"""
+
+[tasks."spark:run2"]
+description = "Run Spark leaderboard processor on cluster"
+depends = ["docker-up"]
+run = "docker compose -f docker/docker-compose.yml exec -it spark-master spark-submit --master spark://spark-master:7077 /opt/spark/jobs/leaderboard_processor.py /opt/spark/jobs/fixed-dataset.parquet /opt/spark/jobs/output/leaderboard_snapshots --window-size 5 --top-n 10 --ttl 30 --snapshot-interval 7"

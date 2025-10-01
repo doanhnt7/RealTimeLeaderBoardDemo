@@ -257,7 +257,7 @@ class LeaderBoardProcessor:
 
 def main():
     parser = argparse.ArgumentParser(description='Spark LeaderBoard Processor')
-    parser.add_argument('input_path', help='Path to input JSONL file')
+    parser.add_argument('input_path', help='Path to input parquet file')
     parser.add_argument('output_path', help='Path to output snapshots')
     parser.add_argument('--window-size', type=int, default=5, help='Window size in minutes (default: 5)')
     parser.add_argument('--top-n', type=int, default=10, help='Top N users (default: 10)')
@@ -277,7 +277,6 @@ def main():
     # Initialize Spark
     spark = SparkSession.builder \
         .appName("LeaderBoardProcessor") \
-        .master("local[*]") \
         .getOrCreate()
     
     try:
