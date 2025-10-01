@@ -10,6 +10,7 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
+import org.apache.flink.util.OutputTag;
 import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +25,7 @@ import java.util.TreeMap;
 import org.apache.flink.table.runtime.typeutils.SortedMapTypeInfo;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import java.util.Collections;
+import org.apache.flink.api.java.tuple.Tuple2;
 /**
  * A retractable TopN function similar to Flink's table runtime version but adapted for Score objects.
  * 
@@ -42,6 +44,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     
     private final int topN;
     private final long cleanupIntervalMs;
+    private final long snapshotIntervalMs = 7 * 60 * 1000L; // 7 minutes
     private final long ttlMinutes;
     
     // State to store mapping from score value to list of users with that score
@@ -50,8 +53,6 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     // State to store sorted map of score -> count for efficient ranking  
     private transient ValueState<SortedMap<Double, Long>> treeMap;
     
-    // State to track if cleanup timer is registered
-    private transient ValueState<Boolean> timerRegistered;
    
     class RetractContext { Score insertFromRetract; Score deleteFromRetract; }
 
@@ -59,6 +60,9 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     private static final Comparator<Double> SCORE_COMPARATOR = Collections.reverseOrder();
 
     private transient ValueState<Long> lastCleanupTime;
+    private transient ValueState<Long> lastSnapshotTime;
+    // Side output tag for emitting full snapshot as a single List<Score>
+    public static final OutputTag<Tuple2<Long, List<Score>>> SNAPSHOT_OUTPUT = new OutputTag<Tuple2<Long, List<Score>>>("topn-snapshot"){};
     
     // Helper methods for rank checking
     private boolean isInRankEnd(long rank) {
@@ -100,16 +104,15 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                 SCORE_COMPARATOR));                // Comparator
         treeMapDescriptor.enableTimeToLive(ttlConfig);
         treeMap = getRuntimeContext().getState(treeMapDescriptor);
-
-        // Initialize timer registration state with TTL
-        ValueStateDescriptor<Boolean> timerDescriptor = 
-            new ValueStateDescriptor<>("timer-registered", Types.BOOLEAN);
-        timerDescriptor.enableTimeToLive(ttlConfig);
-        timerRegistered = getRuntimeContext().getState(timerDescriptor);
+   
 
         ValueStateDescriptor<Long> lastCleanupDesc =
         new ValueStateDescriptor<>("last-cleanup-time", Types.LONG);
         lastCleanupTime = getRuntimeContext().getState(lastCleanupDesc);
+
+        ValueStateDescriptor<Long> lastSnapshotDesc =
+        new ValueStateDescriptor<>("last-snapshot-time", Types.LONG);
+        lastSnapshotTime = getRuntimeContext().getState(lastSnapshotDesc);
 
     }
     
@@ -123,7 +126,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         // trường hợp này khó xảy ra trong context streaming realtime
 
         // Register cleanup timer if not already registered
-        registerCleanupTimer(ctx, out);
+        registerTimer(ctx, out);
 
         SortedMap<Double, Long> currentTreeMap = treeMap.value();
         if (currentTreeMap == null) {
@@ -361,19 +364,26 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
 
     
     /**
-     * Register cleanup timer if not already registered
+     * Register timer if not already registered
      */
-    private void registerCleanupTimer(KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context ctx, Collector<ScoreChangeEvent> out) throws Exception {
-        Boolean registered = timerRegistered.value();
-
-        if (registered == null || !registered) {
-            // First time - register timer for next cleanup
-            long currentTime = ctx.timestamp();
-            long nextCleanupTime = currentTime + cleanupIntervalMs*2;
+    private void registerTimer(KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context ctx, Collector<ScoreChangeEvent> out) throws Exception {
+        Long lc = lastCleanupTime.value();
+        Long ls = lastSnapshotTime.value();
+        long currentTime = ctx.timestamp();
+        if (lc == null ) {
+            // First time - register timers
+           
+            long nextCleanupTime = currentTime + cleanupIntervalMs * 2;
             ctx.timerService().registerEventTimeTimer(nextCleanupTime);
-            timerRegistered.update(true);
             lastCleanupTime.update(nextCleanupTime);
+          
             out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETEALL));
+        }
+        if(ls == null){
+            // Also register snapshot timer
+            long nextSnapshotTime = currentTime + snapshotIntervalMs;
+            ctx.timerService().registerEventTimeTimer(nextSnapshotTime);
+            lastSnapshotTime.update(nextSnapshotTime);
         }
     }
     
@@ -465,22 +475,58 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     public void onTimer(long timestamp, 
                        KeyedProcessFunction<String, Score, ScoreChangeEvent>.OnTimerContext ctx, 
                        Collector<ScoreChangeEvent> out) throws Exception {
-        
-        // Perform cleanup and emit change events for expired records
-        cleanupExpiredEntries(timestamp, out);
-        
-        // Register next cleanup timer
-        long nextCleanupTime = timestamp + cleanupIntervalMs;
-        ctx.timerService().registerEventTimeTimer(nextCleanupTime);
-        lastCleanupTime.update(nextCleanupTime);
-    
-        
-        LOG.debug("Cleanup timer fired at timestamp: {}, next cleanup at: {}", timestamp, nextCleanupTime);
+
+        // Handle snapshot timer if due
+        Long nextSnapshot = lastSnapshotTime.value();
+        if (nextSnapshot != null && timestamp == nextSnapshot) {
+            snapshotTopNToSideOutput(ctx, timestamp);
+            long rescheduleSnapshot = timestamp + snapshotIntervalMs;
+            ctx.timerService().registerEventTimeTimer(rescheduleSnapshot);
+            lastSnapshotTime.update(rescheduleSnapshot);
+            LOG.info("Snapshot timer fired at timestamp: {}, next snapshot at: {}", timestamp, rescheduleSnapshot);
+        }
+
+        // Handle cleanup timer if due
+        Long nextCleanup = lastCleanupTime.value();
+        if (nextCleanup != null && timestamp == nextCleanup) {
+            cleanupExpiredEntries(timestamp, out);
+            long rescheduleCleanup = timestamp + cleanupIntervalMs;
+            ctx.timerService().registerEventTimeTimer(rescheduleCleanup);
+            lastCleanupTime.update(rescheduleCleanup);
+            LOG.debug("Cleanup timer fired at timestamp: {}, next cleanup at: {}", timestamp, rescheduleCleanup);
+        }
     }
     
     @Override
     public void close() throws Exception {
         super.close();
         LOG.info("RetractableTopNFunction closed for topN: {}, ttl: {} minutes", topN, ttlMinutes);
+    }
+
+    /**
+     * Builds the current Top-N list and emits a full refresh downstream.
+     * Downstream sink can persist this snapshot to MongoDB.
+     */
+    private void snapshotTopNToSideOutput(KeyedProcessFunction<String, Score, ScoreChangeEvent>.OnTimerContext ctx, long timestamp) throws Exception {
+        SortedMap<Double, Long> currentTreeMap = treeMap.value();
+        Tuple2<Long, List<Score>> snapshot = new Tuple2<>(timestamp, new ArrayList<>());
+        if (currentTreeMap != null && !currentTreeMap.isEmpty()) {
+            long emitted = 0L;
+            for (Map.Entry<Double, Long> entry : currentTreeMap.entrySet()) {
+                if (emitted >= topN) break;
+                Double scoreKey = entry.getKey();
+                List<Score> scores = dataState.get(scoreKey);
+                if (scores == null || scores.isEmpty()) {
+                    continue;
+                }
+                for (Score s : scores) {
+                    if (emitted >= topN) break;
+                    snapshot.f1.add(s);
+                    emitted++;
+                }
+            }
+        }
+        ctx.output(SNAPSHOT_OUTPUT, snapshot);
+        LOG.info("Emitted snapshot list with {} records (Top-{})", snapshot.f1.size(), topN);
     }
 }

@@ -26,7 +26,7 @@ class Config:
     
     # Kafka settings
     KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:29092')
-    KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'user_submissions')
+    KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'leaderboard_update')
     
     # Logging
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
