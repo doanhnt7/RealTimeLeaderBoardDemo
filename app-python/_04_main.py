@@ -386,7 +386,7 @@ def create_parser():
     # Replay Parquet into Kafka at a rate
     replay_kafka_parser = subparsers.add_parser('replay-parquet-kafka', help='Replay records from a Parquet file into Kafka at given rate')
     replay_kafka_parser.add_argument('--input', type=str, default='fixed-dataset.parquet', help='Input Parquet path')
-    replay_kafka_parser.add_argument('--rate', type=int, help='Events per second')
+    replay_kafka_parser.add_argument('--rate', type=int, help='Events per second', default=0)
     replay_kafka_parser.add_argument('--kafka-servers', type=str, help='Kafka bootstrap servers')
     replay_kafka_parser.add_argument('--kafka-topic', type=str, help='Kafka topic name')
 
