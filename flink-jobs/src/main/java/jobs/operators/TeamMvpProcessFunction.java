@@ -34,6 +34,8 @@ public class TeamMvpProcessFunction extends KeyedProcessFunction<String, UserSco
         // Get previous MVP info
         String prevMvpUserId = previousMvpUserIdState.value();
         Double prevMvpUserTotal = previousMvpUserTotalState.value();
+        Double teamTotal = teamTotalState.value();
+        if (teamTotal == null) teamTotal = 0.0;
         if (prevMvpUserId == null) prevMvpUserId = "";
         if (prevMvpUserTotal == null) prevMvpUserTotal = 0.0;
 
@@ -54,7 +56,7 @@ public class TeamMvpProcessFunction extends KeyedProcessFunction<String, UserSco
         // For team total, we'll use the MVP's total as a proxy
         // In a real scenario, you'd want to track all users' totals properly
         // This is a simplified approach where team total = MVP total
-        double teamTotal = newMvpUserTotal;
+        teamTotal = teamTotal + value.getCurrentScore();
         teamTotalState.update(teamTotal);
 
         // Calculate contribution ratio

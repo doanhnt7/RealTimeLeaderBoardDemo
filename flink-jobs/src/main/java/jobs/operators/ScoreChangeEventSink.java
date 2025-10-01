@@ -1,6 +1,7 @@
 package jobs.operators;
 
 import jobs.models.ScoreChangeEvent;
+import jobs.models.Score;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.WriterInitContext;
@@ -16,41 +17,52 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Sink that processes ScoreChangeEvent objects and applies incremental updates to Redis sorted set.
+ * Sink that processes ScoreChangeEvent objects and applies incremental updates to Redis sorted sets.
  * 
- * For INSERT events: adds the score to the sorted set
- * For DELETE events: removes the score from the sorted set
+ * For INSERT events: adds the score and timestamp to their respective sorted sets
+ * For DELETE events: removes the score and timestamp from their respective sorted sets
  */
 public class ScoreChangeEventSink implements Sink<ScoreChangeEvent> {
     private static final Logger LOG = LoggerFactory.getLogger(ScoreChangeEventSink.class);
-    
+
     private final String redisHost;
     private final int redisPort;
-    private final String redisKey;
+    private final String redisScoreKey;
+    private final String redisTimestampKey;
 
-    public ScoreChangeEventSink(String redisHost, int redisPort, String redisKey) {
+    /**
+     * @param redisHost Redis host
+     * @param redisPort Redis port
+     * @param redisScoreKey Sorted set key for scores
+     * 
+     * The timestamp sorted set key will be redisScoreKey + ":ts"
+     */
+    public ScoreChangeEventSink(String redisHost, int redisPort, String redisScoreKey) {
         this.redisHost = redisHost;
         this.redisPort = redisPort;
-        this.redisKey = redisKey;
+        this.redisScoreKey = redisScoreKey;
+        this.redisTimestampKey = redisScoreKey + ":ts";
     }
 
     @Override
     public SinkWriter<ScoreChangeEvent> createWriter(WriterInitContext context) {
-        return new RedisChangeEventWriter(redisHost, redisPort, redisKey);
+        return new RedisChangeEventWriter(redisHost, redisPort, redisScoreKey, redisTimestampKey);
     }
 
     private static class RedisChangeEventWriter implements SinkWriter<ScoreChangeEvent> {
         private final String redisHost;
         private final int redisPort;
-        private final String redisKey;
+        private final String redisScoreKey;
+        private final String redisTimestampKey;
         private transient JedisPooled jedis;
         private transient BufferedWriter fileWriter;
         private transient Path logFilePath;
 
-        public RedisChangeEventWriter(String redisHost, int redisPort, String redisKey) {
+        public RedisChangeEventWriter(String redisHost, int redisPort, String redisScoreKey, String redisTimestampKey) {
             this.redisHost = redisHost;
             this.redisPort = redisPort;
-            this.redisKey = redisKey;
+            this.redisScoreKey = redisScoreKey;
+            this.redisTimestampKey = redisTimestampKey;
         }
 
         @Override
@@ -85,31 +97,41 @@ public class ScoreChangeEventSink implements Sink<ScoreChangeEvent> {
 
             // Log the entire change event for debugging/auditing
             LOG.info("Processing ScoreChangeEvent: {}", changeEvent);
-
-            String userId = changeEvent.getScore().getId();
-            double score = changeEvent.getScore().getScore();
             try {
-                if (changeEvent.isInsert()) {
-                    // INSERT: Add the score to the sorted set
-                    jedis.zadd(redisKey, score, userId);
-                    LOG.debug("INSERT: Added user {} with score {} to Redis key '{}'", 
-                        userId, score, redisKey);
-                        
-                } else if (changeEvent.isDelete()) {
-                    // DELETE: Remove the score from the sorted set
-                    long removed = jedis.zrem(redisKey, userId);
-                    if (removed > 0) {
-                        LOG.debug("DELETE: Removed user {} from Redis key '{}'", 
-                            userId, redisKey);
-                    } else {
-                        LOG.warn("DELETE: User {} was not found in Redis key '{}'", userId, redisKey);
+                if (changeEvent.isDeleteAll()) {
+                    // DELETEALL: Remove all scores and timestamps from the sorted sets
+                    jedis.del(redisScoreKey);
+                    jedis.del(redisTimestampKey);
+                    LOG.debug("DELETEALL: Removed all scores from Redis key '{}' and all timestamps from '{}'", redisScoreKey, redisTimestampKey);
+                } else {
+                    Score scoreObj = changeEvent.getScore();
+                    if (scoreObj == null) {
+                        LOG.warn("ScoreChangeEvent has null score, skipping");
+                        return;
+                    }
+                    String userId = scoreObj.getId();
+                    double score = scoreObj.getScore();
+                    long timestamp = scoreObj.getLastUpdateTime();
+
+                    if (changeEvent.isInsert()) {
+                        // INSERT: Add the score to the score sorted set and timestamp to the timestamp sorted set
+                        jedis.zadd(redisScoreKey, score, userId);
+                        jedis.zadd(redisTimestampKey, (double) timestamp, userId);
+                        LOG.debug("INSERT: Added user {} with score {} to Redis key '{}', timestamp {} to '{}'",
+                                userId, score, redisScoreKey, timestamp, redisTimestampKey);
+                    } else if (changeEvent.isDelete()) {
+                        // DELETE: Remove the score and timestamp from the sorted sets
+                        long removedScore = jedis.zrem(redisScoreKey, userId);
+                        long removedTs = jedis.zrem(redisTimestampKey, userId);
+                        if (removedScore > 0 || removedTs > 0) {
+                            LOG.debug("DELETE: Removed user {} from Redis keys '{}' (score) and '{}' (timestamp)",
+                                    userId, redisScoreKey, redisTimestampKey);
+                        } else {
+                            LOG.warn("DELETE: User {} was not found in Redis keys '{}' or '{}'", userId, redisScoreKey, redisTimestampKey);
+                        }
                     }
                 }
-                else if (changeEvent.isDeleteAll()) {
-                    // DELETEALL: Remove all scores from the sorted set
-                    jedis.zremrangeByRank(redisKey, 0, -1);
-                    LOG.debug("DELETEALL: Removed all scores from Redis key '{}'", redisKey);
-                }
+
                 // Append only the change event string to the TXT file
                 if (fileWriter != null) {
                     String line = changeEvent.toString() + System.lineSeparator();
@@ -121,8 +143,8 @@ public class ScoreChangeEventSink implements Sink<ScoreChangeEvent> {
                     }
                 }
             } catch (Exception e) {
-                LOG.error("Failed to process change event {} for Redis key '{}'", 
-                    changeEvent, redisKey, e);
+                LOG.error("Failed to process change event {} for Redis keys '{}', '{}'",
+                        changeEvent, redisScoreKey, redisTimestampKey, e);
             }
         }
 

@@ -78,6 +78,11 @@ public class RetractableTopNFunctionTest {
 // 2. không có prevScore và điểm trong topN
 // 3. có prev Score không trong top N và score trong topN
 // 4. có prevScore trong top N và score trong top N
+//5. có prevScore trong top N và score out top N
+//7. có prevScore out top N và score out top N
+//8. có prevScore trong top N và score out top N
+//9. test cleanup timer
+
     @Test
     public void testFourInsertsTopNTransitions() throws Exception {
         long t0 = 1_000L;

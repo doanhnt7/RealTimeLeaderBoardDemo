@@ -107,6 +107,74 @@ async def generate_json_file(count: int, output_path: str, num_user: int, num_ap
     logger.info("Dataset written", path=output_path)
 
 
+async def generate_parquet_file(count: int, output_path: str, num_user: int, num_app: int):
+    """Generate Parquet file for better performance with large datasets"""
+    logger = structlog.get_logger()
+    logger.info("Generating fixed dataset Parquet", count=count, output=output_path)
+    
+    try:
+        import pandas as pd
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError:
+        logger.error("Required packages not available. Please install: pip install pandas pyarrow")
+        return
+    
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    gen = RealtimeDataProducer(
+        mongo_uri=config.MONGO_URI,
+        mongo_db=config.MONGO_DB,
+        mongo_collection=config.MONGO_COLLECTION,
+        sleep_rate=config.SLEEP_RATE,
+        num_user=num_user,
+        num_app=num_app,
+    ).data_generator
+    
+    # Generate data in batches for memory efficiency
+    batch_size = 10000
+    total_batches = (count + batch_size - 1) // batch_size
+    
+    logger.info(f"Generating {count} records in {total_batches} batches of {batch_size}")
+    
+    # Collect all data first
+    all_data = []
+    for batch_num in range(total_batches):
+        batch_count = min(batch_size, count - batch_num * batch_size)
+        batch_data = []
+        
+        for _ in range(batch_count):
+            doc = gen.generate_user_submission()
+            # Convert to serializable format
+            serializable_doc = _serialize_doc_for_json(doc)
+            batch_data.append(serializable_doc)
+        
+        all_data.extend(batch_data)
+        
+        if (batch_num + 1) % 10 == 0:  # Log every 10 batches
+            logger.info(f"Generated batch {batch_num + 1}/{total_batches}")
+    
+    # Create DataFrame and write as Parquet
+    logger.info("Creating DataFrame and writing Parquet...")
+    df = pd.DataFrame(all_data)
+    
+    # Write with compression for better performance
+    df.to_parquet(
+        output_path, 
+        index=False,
+        compression='snappy',  # Fast compression
+        engine='pyarrow'
+    )
+    
+    # Get file size for logging
+    import os
+    file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    
+    logger.info("Parquet dataset written", 
+                path=output_path, 
+                records=len(all_data),
+                file_size_mb=f"{file_size_mb:.2f}MB")
+
+
 async def replay_json_file(input_path: str, rate: int):
     logger = structlog.get_logger()
     if not os.path.isfile(input_path):
@@ -172,6 +240,13 @@ def create_parser():
     gen_parser.add_argument('--num-user', type=int, help='Number of unique users to pre-initialize')
     gen_parser.add_argument('--num-app', type=int, help='Number of apps to randomly assign per user')
 
+    # Generate fixed dataset to Parquet
+    parquet_parser = subparsers.add_parser('generate-parquet', help='Generate N records to a Parquet file')
+    parquet_parser.add_argument('--count', type=int, default=100, help='Number of records to generate')
+    parquet_parser.add_argument('--output', type=str, default='fixed-dataset.parquet', help='Output Parquet path')
+    parquet_parser.add_argument('--num-user', type=int, help='Number of unique users to pre-initialize')
+    parquet_parser.add_argument('--num-app', type=int, help='Number of apps to randomly assign per user')
+
     # Replay JSONL into MongoDB at a rate
     replay_parser = subparsers.add_parser('replay-json', help='Replay records from a JSONL file into MongoDB at given rate')
     replay_parser.add_argument('--input', type=str, default='fixed-dataset.jsonl', help='Input JSONL path')
@@ -212,6 +287,13 @@ async def main():
             )
         elif args.command == 'generate-json':
             await generate_json_file(
+                count=args.count,
+                output_path=args.output,
+                num_user=args.num_user or config.NUM_USER,
+                num_app=args.num_app or config.NUM_APP,
+            )
+        elif args.command == 'generate-parquet':
+            await generate_parquet_file(
                 count=args.count,
                 output_path=args.output,
                 num_user=args.num_user or config.NUM_USER,

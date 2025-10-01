@@ -48,11 +48,16 @@ public class BaseSink implements Sink<User> {
                 int level = value.getLevel();
                 int prevLevel = value.getPreviousLevel();
                 int scoreDelta = level - prevLevel;
+                long updatedAt = value.getUpdatedAt();
                 if (uid != null) {
+                    // All-time leaderboard (by level)
                     jedis.zadd("leaderboard_user_alltime", (double) level, uid);
 
+                    // All-time leaderboard:ts (by timestamp)
+                    jedis.zadd("leaderboard_user_alltime:ts", (double) updatedAt, uid);
+
                     OffsetDateTime ts = OffsetDateTime.ofInstant(
-                        java.time.Instant.ofEpochMilli(value.getUpdatedAt()),
+                        java.time.Instant.ofEpochMilli(updatedAt),
                         java.time.ZoneOffset.UTC
                     );
                     WeekFields wf = WeekFields.of(Locale.JAPANESE);

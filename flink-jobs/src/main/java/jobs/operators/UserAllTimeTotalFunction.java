@@ -34,7 +34,7 @@ public class UserAllTimeTotalFunction extends KeyedProcessFunction<String, User,
             userTotalState.update(total);
         }
 
-        out.collect(new UserScore(value.getUserId(), value.getTeamId(), total, value.getUpdatedAt()));
+        out.collect(new UserScore(value.getUserId(), value.getTeamId(), total, delta, value.getUpdatedAt()));
     }
 }
 

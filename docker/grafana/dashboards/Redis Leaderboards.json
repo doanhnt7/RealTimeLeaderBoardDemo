@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 1,
+  "id": 3,
   "links": [],
   "panels": [
     {
@@ -60,7 +60,7 @@
         "x": 0,
         "y": 0
       },
-      "id": 1,
+      "id": 4,
       "options": {
         "cellHeight": "sm",
         "frameIndex": 0,
@@ -75,7 +75,7 @@
             "uid": "redis"
           },
           "hide": false,
-          "keyName": "leaderboard_weekly_highest_level:2025:39",
+          "keyName": "top_level_gainers_recent",
           "max": "-1",
           "min": "0",
           "query": "",
@@ -85,7 +85,7 @@
           "zrangeQuery": ""
         }
       ],
-      "title": "Weekly Highest Level (Top 20)",
+      "title": "Top 10 user in 1 minute, cleanup outdate user each 5mins",
       "transformations": [
         {
           "id": "reduce",
@@ -150,7 +150,7 @@
         "x": 8,
         "y": 0
       },
-      "id": 2,
+      "id": 3,
       "options": {
         "cellHeight": "sm",
         "frameIndex": 0,
@@ -165,7 +165,7 @@
             "uid": "redis"
           },
           "hide": false,
-          "keyName": "leaderboard_weekly_levels_gained:2025:39",
+          "keyName": "leaderboard_user_alltime",
           "max": "-1",
           "min": "0",
           "query": "",
@@ -175,7 +175,7 @@
           "zrangeQuery": ""
         }
       ],
-      "title": "Weekly Levels Gained (Top 20)",
+      "title": "All-time Leaderboard",
       "transformations": [
         {
           "id": "reduce",
@@ -240,7 +240,7 @@
         "x": 16,
         "y": 0
       },
-      "id": 3,
+      "id": 7,
       "options": {
         "cellHeight": "sm",
         "frameIndex": 0,
@@ -255,7 +255,7 @@
             "uid": "redis"
           },
           "hide": false,
-          "keyName": "leaderboard_user_alltime",
+          "keyName": "leaderboard_user_alltime:ts",
           "max": "-1",
           "min": "0",
           "query": "",
@@ -265,7 +265,7 @@
           "zrangeQuery": ""
         }
       ],
-      "title": "All-time Leaderboard (Top 20)",
+      "title": "All-time Leaderboard",
       "transformations": [
         {
           "id": "reduce",
@@ -330,7 +330,7 @@
         "x": 0,
         "y": 9
       },
-      "id": 4,
+      "id": 6,
       "options": {
         "cellHeight": "sm",
         "frameIndex": 0,
@@ -345,7 +345,7 @@
             "uid": "redis"
           },
           "hide": false,
-          "keyName": "top_level_gainers_recent",
+          "keyName": "top_level_gainers_recent:ts",
           "max": "-1",
           "min": "0",
           "query": "",
@@ -355,7 +355,97 @@
           "zrangeQuery": ""
         }
       ],
-      "title": "Top user in 1minute recent 5minute",
+      "title": "Top 10 user in 1 minute, cleanup outdate user each 5mins",
+      "transformations": [
+        {
+          "id": "reduce",
+          "options": {
+            "labelsToFields": true,
+            "reducers": [
+              "sum"
+            ]
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Total"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "redis"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 9
+      },
+      "id": 5,
+      "options": {
+        "cellHeight": "sm",
+        "frameIndex": 0,
+        "showHeader": true
+      },
+      "pluginVersion": "12.2.0",
+      "targets": [
+        {
+          "command": "hgetall",
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "redis"
+          },
+          "hide": false,
+          "keyName": "team_mvp:4",
+          "max": "-1",
+          "min": "0",
+          "query": "",
+          "refId": "A",
+          "streaming": false,
+          "type": "command",
+          "zrangeQuery": ""
+        }
+      ],
+      "title": "Team Mvp",
       "transformations": [
         {
           "id": "reduce",
