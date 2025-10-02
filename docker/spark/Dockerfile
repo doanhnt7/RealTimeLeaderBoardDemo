@@ -1,4 +1,4 @@
-FROM bitnami/spark:3.5.0
+FROM apache/spark:3.5.7-java17-python3
 
 # Switch to root to install packages
 USER root
