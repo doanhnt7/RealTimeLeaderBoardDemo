@@ -60,7 +60,8 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     private static final Comparator<Double> SCORE_COMPARATOR = Collections.reverseOrder();
 
     private transient ValueState<Long> lastCleanupTime;
-    private transient ValueState<Long> lastSnapshotTime;
+    private transient ValueState<Long> nextSnapshotTime;
+    private transient ValueState<Long> prevEventTimestamp;
     // Side output tag for emitting full snapshot as a single List<Score>
     public static final OutputTag<Tuple2<Long, List<Score>>> SNAPSHOT_OUTPUT = new OutputTag<Tuple2<Long, List<Score>>>("topn-snapshot"){};
     
@@ -112,7 +113,11 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
 
         ValueStateDescriptor<Long> lastSnapshotDesc =
         new ValueStateDescriptor<>("last-snapshot-time", Types.LONG);
-        lastSnapshotTime = getRuntimeContext().getState(lastSnapshotDesc);
+        nextSnapshotTime = getRuntimeContext().getState(lastSnapshotDesc);
+
+        ValueStateDescriptor<Long> prevEventTimestampDesc =
+        new ValueStateDescriptor<>("prev-event-timestamp", Types.LONG);
+        prevEventTimestamp = getRuntimeContext().getState(prevEventTimestampDesc);
 
     }
     
@@ -127,7 +132,22 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
 
         // Register cleanup timer if not already registered
         registerTimer(ctx, out);
-
+        
+        Long ns = nextSnapshotTime.value();
+        Long currentTs = ctx.timestamp();
+        if(ns == null){
+            nextSnapshotTime.update(currentTs + snapshotIntervalMs);
+        }else{
+            Long _prevEventTimestamp = prevEventTimestamp.value();
+                if (_prevEventTimestamp != null && ctx.timestamp() >= ns && ns >= _prevEventTimestamp) {
+                    snapshotTopNToSideOutput((KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context) ctx, ns);
+                    nextSnapshotTime.update(ns + snapshotIntervalMs);
+                }// trong luồng thực tế nếu nhiều event đến cùng lúc thì event đến đầu tiên sẽ trigger snapshot
+            }
+        
+        
+        prevEventTimestamp.update(ctx.timestamp());
+        
         SortedMap<Double, Long> currentTreeMap = treeMap.value();
         if (currentTreeMap == null) {
             currentTreeMap = new TreeMap<>(SCORE_COMPARATOR);
@@ -368,7 +388,6 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
      */
     private void registerTimer(KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context ctx, Collector<ScoreChangeEvent> out) throws Exception {
         Long lc = lastCleanupTime.value();
-        Long ls = lastSnapshotTime.value();
         long currentTime = ctx.timestamp();
         if (lc == null ) {
             // First time - register timers
@@ -378,12 +397,6 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
             lastCleanupTime.update(nextCleanupTime);
           
             out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETEALL));
-        }
-        if(ls == null){
-            // Also register snapshot timer
-            long nextSnapshotTime = currentTime + snapshotIntervalMs;
-            ctx.timerService().registerEventTimeTimer(nextSnapshotTime);
-            lastSnapshotTime.update(nextSnapshotTime);
         }
     }
     
@@ -476,16 +489,6 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                        KeyedProcessFunction<String, Score, ScoreChangeEvent>.OnTimerContext ctx, 
                        Collector<ScoreChangeEvent> out) throws Exception {
 
-        // Handle snapshot timer if due
-        Long nextSnapshot = lastSnapshotTime.value();
-        if (nextSnapshot != null && timestamp == nextSnapshot) {
-            snapshotTopNToSideOutput(ctx, timestamp);
-            long rescheduleSnapshot = timestamp + snapshotIntervalMs;
-            ctx.timerService().registerEventTimeTimer(rescheduleSnapshot);
-            lastSnapshotTime.update(rescheduleSnapshot);
-            LOG.info("Snapshot timer fired at timestamp: {}, next snapshot at: {}", timestamp, rescheduleSnapshot);
-        }
-
         // Handle cleanup timer if due
         Long nextCleanup = lastCleanupTime.value();
         if (nextCleanup != null && timestamp == nextCleanup) {
@@ -507,7 +510,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
      * Builds the current Top-N list and emits a full refresh downstream.
      * Downstream sink can persist this snapshot to MongoDB.
      */
-    private void snapshotTopNToSideOutput(KeyedProcessFunction<String, Score, ScoreChangeEvent>.OnTimerContext ctx, long timestamp) throws Exception {
+    private void snapshotTopNToSideOutput(KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context ctx, long timestamp) throws Exception {
         SortedMap<Double, Long> currentTreeMap = treeMap.value();
         Tuple2<Long, List<Score>> snapshot = new Tuple2<>(timestamp, new ArrayList<>());
         if (currentTreeMap != null && !currentTreeMap.isEmpty()) {
