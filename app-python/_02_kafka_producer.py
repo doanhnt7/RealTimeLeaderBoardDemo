@@ -59,7 +59,7 @@ class KafkaManager:
             self._admin = AdminClient({'bootstrap.servers': self.bootstrap_servers})
         return self._admin
 
-    def ensure_topic(self, topic: str, num_partitions: int = 4, replication_factor: int = 1, timeout: float = 10.0):
+    def ensure_topic(self, topic: str, num_partitions: int = 1, replication_factor: int = 1, timeout: float = 10.0):
         """Ensure topic exists with at least num_partitions. Create or increase partitions if needed."""
         try:
             if topic in self._ensured_topics:

@@ -274,7 +274,7 @@ async def replay_parquet_to_kafka(input_path: str, rate: int, kafka_servers: str
     
     try:
         # Ensure topic exists
-        kafka_manager.ensure_topic(kafka_topic, num_partitions=4, replication_factor=1)
+        kafka_manager.ensure_topic(kafka_topic, num_partitions=1, replication_factor=1)
         
         # Read parquet file via PyArrow for faster iteration
         logger.info("Reading Parquet file...")

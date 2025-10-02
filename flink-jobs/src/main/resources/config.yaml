@@ -14,7 +14,7 @@ taskmanager:
     process:
       size: 2g
   bind-host: 0.0.0.0
-  numberOfTaskSlots: '4'
+  numberOfTaskSlots: '1'
 rest:
   flamegraph:
     enabled: true

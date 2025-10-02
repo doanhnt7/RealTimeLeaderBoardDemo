@@ -96,7 +96,7 @@ public class ScoreChangeEventSink implements Sink<ScoreChangeEvent> {
             }
 
             // Log the entire change event for debugging/auditing
-            LOG.info("Processing ScoreChangeEvent: {}", changeEvent);
+            // LOG.info("Processing ScoreChangeEvent: {}", changeEvent);
             try {
                 if (changeEvent.isDeleteAll()) {
                     // DELETEALL: Remove all scores and timestamps from the sorted sets

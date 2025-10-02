@@ -35,7 +35,7 @@ public class LeaderBoardBuilder {
 
 		DataStream<User> events = env.fromSource(
 				source,
-				WatermarkStrategy.<User>forBoundedOutOfOrderness(Duration.ofSeconds(0))
+				WatermarkStrategy.<User>forBoundedOutOfOrderness(Duration.ofSeconds(10))
 					.withTimestampAssigner((SerializableTimestampAssigner<User>) (e, ts) -> e.getUpdatedAt())
 					.withIdleness(Duration.ofSeconds(30)),
 				"users-source");
