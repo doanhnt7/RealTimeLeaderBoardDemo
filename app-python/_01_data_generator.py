@@ -90,6 +90,62 @@ class UserDataGenerator:
         # Advance time deterministically by 0.1s per generated record
         logical_offset_seconds = self._generated_count / 10.0
         now = datetime.now(timezone.utc) + timedelta(seconds=logical_offset_seconds)
+        
+        # Check if this is a whale user generation time (4 minutes + 5*x minutes)
+        # 4 minutes = 240 seconds, 5 minutes = 300 seconds
+        if logical_offset_seconds >= 240 and (logical_offset_seconds - 240) % 300 == 0:
+            x = int((logical_offset_seconds - 240) / 300)
+            if x >= 0:  # Ensure x is non-negative
+                # Generate whale user
+                whale_uid = f"whale_{x}"
+                whale_level = 10000 + x
+                
+                # Create whale user data
+                whale_base = {
+                    "uid": whale_uid,
+                    "geo": self.fake.random_element(elements=("US", "UK", "DE", "FR", "JP", "VN")),
+                    "avatar": str(self.fake.random_int(min=1, max=20)),
+                    "role": str(uuid.uuid4()),
+                    "name": f"Whale Player {x}",
+                    "devices": [
+                        {
+                            "fb_analytics_instance_id": self.fake.pystr(min_chars=32, max_chars=32).upper(),
+                            "fb_instance_id": self.fake.pystr(min_chars=22, max_chars=22),
+                            "fcmToken": "empty",
+                        }
+                    ],
+                    "email": None,
+                    "authProvider": None,
+                    "resources": [],
+                    "team": self.fake.random_int(min=1, max=10)
+                }
+                
+                # Create whale document
+                document = {
+                    "uid": whale_base["uid"],
+                    "email": whale_base["email"],
+                    "authProvider": whale_base["authProvider"],
+                    "appId": random.choice(self.app_ids),
+                    "avatar": whale_base["avatar"],
+                    "geo": whale_base["geo"],
+                    "role": whale_base["role"],
+                    "lastLoginAt": now,
+                    "name": whale_base["name"],
+                    "devices": whale_base["devices"],
+                    "resources": whale_base["resources"],
+                    "created_at": now,
+                    "updated_at": now,
+                    "level": whale_level,
+                    "previousLevel": 0,  # Whale users start fresh
+                    "updatedAt": now,
+                    "team": whale_base["team"],
+                }
+                
+                # Increment counter after emission
+                self._generated_count += 1
+                return document
+        
+        # Regular user generation logic
         # Select a user uid from the pre-generated list
         uid = random.choice(self.user_uids)
         # Dynamic fields only below (fixed are loaded from cache)
