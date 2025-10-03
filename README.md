@@ -17,7 +17,19 @@ Dự án này mô phỏng một hệ thống leaderboard real-time với các th
 - **Visulization**: Grafa
 
 Luồng data: app-python -> kafka -> flink -> snapshot mongoDB/ leaderboard redis
+
 Luồng app-python -> mongoDB -> kafka qua debezium connector không còn được sử dụng
+
+Có 3 leaderboard chính được tính toán:
+
+- All-time theo level người dùng (Redis ZSET: `leaderboard_user_alltime`)
+- Weekly highest level gained theo tuần (Redis ZSET:  `leaderboard_weekly_levels_gained:{year}:{week}`)
+- Top-N user tăng level nhiều nhất gần đây (sliding window) — cập nhật incrementally vào Redis (ZSET: `top_level_gainers_recent`), đồng thời snapshot định kỳ sang MongoDB (`leaderboard.top_level_gainers_snapshots`)
+
+- MVP theo team (Redis Hash: `team_mvp`) — hiện đang comment trong `LeaderBoardBuilder.java`
+- Top-N hot streaks gần đây (Redis ZSET: `top_hotstreaks_recent`) — hiện đang comment trong `LeaderBoardBuilder.java`
+
+Lưu ý: Pipelines "MVP theo team" và "Hot Streaks" hiện đang được comment trong `flink-jobs/src/main/java/jobs/LeaderBoardBuilder.java`.
 
 ## Cấu trúc dự án
 
