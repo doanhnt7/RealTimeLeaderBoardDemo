@@ -20,16 +20,15 @@ Luồng data: app-python -> kafka -> flink -> snapshot mongoDB/ leaderboard redi
 
 Luồng app-python -> mongoDB -> kafka qua debezium connector không còn được sử dụng
 
-Có 3 leaderboard chính được tính toán:
+Có 5 leaderboard chính được tính toán:
 
 - All-time theo level người dùng (Redis ZSET: `leaderboard_user_alltime`)
 - Weekly highest level gained theo tuần (Redis ZSET:  `leaderboard_weekly_levels_gained:{year}:{week}`)
-- Top-N user tăng level nhiều nhất gần đây (sliding window) — cập nhật incrementally vào Redis (ZSET: `top_level_gainers_recent`), đồng thời snapshot định kỳ sang MongoDB (`leaderboard.top_level_gainers_snapshots`)
+- Top-N user tăng level nhiều nhất trong 1 phút, cleanup user không có submission mới trong vòng 5 phút gần nhất, trigger cleanup mỗi 5 phút vào Redis (ZSET: `top_level_gainers_recent`), đồng thời snapshot định kỳ mỗi 7 phút sang MongoDB (`leaderboard.top_level_gainers_snapshots`)
 
-- MVP theo team (Redis Hash: `team_mvp`) — hiện đang comment trong `LeaderBoardBuilder.java`
+- MVP theo team all-time (Redis Hash: `team_mvp`) — hiện đang comment trong `LeaderBoardBuilder.java`
 - Top-N hot streaks gần đây (Redis ZSET: `top_hotstreaks_recent`) — hiện đang comment trong `LeaderBoardBuilder.java`
-
-Lưu ý: Pipelines "MVP theo team" và "Hot Streaks" hiện đang được comment trong `flink-jobs/src/main/java/jobs/LeaderBoardBuilder.java`.
+(Chỉ số này được thiết kế để làm nổi bật top 10 users đang có "chuỗi phong độ cao" (hot streak), nghĩa là hiệu suất ngắn hạn của họ đang vượt trội đáng kể so với trung bình lịch sử. Truy vấn này sử dụng cửa sổ thời gian trượt để tính trung bình ngắn hạn (total gain/total submission) (trong 10 giây) và trung bình dài hạn (trong 60 giây). Tỷ lệ giữa hai giá trị trung bình này xác định mức độ "nóng" của users.)
 
 ## Cấu trúc dự án
 
