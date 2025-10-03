@@ -1,5 +1,8 @@
 FROM flink:2.0.0
 
+# Install curl for health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
 # Tạo thư mục cho user-provided JARs
 RUN mkdir -p /opt/flink/usrlib
 
@@ -9,5 +12,7 @@ RUN wget -P /opt/flink/usrlib \
 
 RUN wget -P /opt/flink/usrlib \
     https://repo.maven.apache.org/maven2/org/apache/flink/flink-metrics-prometheus/2.0.0/flink-metrics-prometheus-2.0.0.jar
+
+
 
 

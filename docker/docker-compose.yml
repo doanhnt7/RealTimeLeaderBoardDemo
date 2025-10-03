@@ -125,10 +125,11 @@ services:
       - "9249:9249"
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-    command: jobmanager
+    command: ["/opt/flink/entrypoint.sh"]
     volumes:
       - ../flink-jobs/target:/opt/flink/jobs
       - ../flink-jobs/src/main/resources/config.yaml:/opt/flink/conf/config.yaml
+      - ./flink/entrypoint.sh:/opt/flink/entrypoint.sh
     restart: unless-stopped
     depends_on:
       - kafka
@@ -268,7 +269,40 @@ services:
   #   #       cpus: '4.0'
   #   #       memory: 2G
 
-  
+  spark-jobs:
+    build:
+      context: ../spark-jobs
+      dockerfile: Dockerfile
+    container_name: spark-jobs-container
+    ports:
+      - "8888:8888"  # Jupyter Lab
+      - "4041:4040"  # Spark UI 
+    volumes:
+      - ../spark-jobs:/spark-jobs
+      - ../flink-jobs:/flink-jobs
+      - ../app-python:/app-python
+      - ../docker:/docker
+    environment:
+      - PYTHONPATH=/app
+      - PYSPARK_PYTHON=python3
+      - PYSPARK_DRIVER_PYTHON=python3
+    restart: unless-stopped
+
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: redis-insight
+    ports:
+      - "5540:5540"
+    environment:
+      - RI_ACCEPT_TERMS_AND_CONDITIONS=true
+      - RI_REDIS_HOST=redis
+      - RI_REDIS_PORT=6379
+      - RI_REDIS_ALIAS=Leaderboard Redis
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+
 
 # volumes:
 #   # Named volumes not required; using project-local bind mounts above
