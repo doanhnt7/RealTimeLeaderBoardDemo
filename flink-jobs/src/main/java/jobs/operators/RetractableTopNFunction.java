@@ -59,7 +59,7 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
     // Comparator for scores (descending order - higher scores first)
     private static final Comparator<Double> SCORE_COMPARATOR = Collections.reverseOrder();
 
-    private transient ValueState<Long> lastCleanupTime;
+    private transient ValueState<Long> nextCleanupTime;
     private transient ValueState<Long> nextSnapshotTime;
     private transient ValueState<Long> prevEventTimestamp;
     // Side output tag for emitting full snapshot as a single List<Score>
@@ -107,9 +107,9 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         treeMap = getRuntimeContext().getState(treeMapDescriptor);
    
 
-        ValueStateDescriptor<Long> lastCleanupDesc =
-        new ValueStateDescriptor<>("last-cleanup-time", Types.LONG);
-        lastCleanupTime = getRuntimeContext().getState(lastCleanupDesc);
+        ValueStateDescriptor<Long> nextCleanupDesc =
+        new ValueStateDescriptor<>("next-cleanup-time", Types.LONG);
+        nextCleanupTime = getRuntimeContext().getState(nextCleanupDesc);
 
         ValueStateDescriptor<Long> lastSnapshotDesc =
         new ValueStateDescriptor<>("last-snapshot-time", Types.LONG);
@@ -130,11 +130,10 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         // Nếu có trường hợp 1 user nào có submit score từ 1 timestamp rất lâu trong quá khứ thì cần check để xử lí, tuy nhiên trường hợp này rất hiếm khi xảy ra, và dù có cũng sẽ được cleanup sau 5phhut
         // trường hợp này khó xảy ra trong context streaming realtime
 
-        // Register cleanup timer if not already registered
-        registerTimer(ctx, out);
-        
-        Long ns = nextSnapshotTime.value();
         Long currentTs = ctx.timestamp();
+        
+        // Handle snapshot trigger logic
+        Long ns = nextSnapshotTime.value();
         if(ns == null){
             nextSnapshotTime.update(currentTs + snapshotIntervalMs);
         }else{
@@ -144,6 +143,18 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
                     nextSnapshotTime.update(ns + snapshotIntervalMs);
                 }// trong luồng thực tế nếu nhiều event đến cùng lúc thì event đến đầu tiên sẽ trigger snapshot
             }
+        
+        // Handle cleanup trigger logic (similar to snapshot logic)
+        Long nc = nextCleanupTime.value();
+        if(nc == null){
+            nextCleanupTime.update(currentTs + cleanupIntervalMs*2);
+        }else{
+            Long _prevEventTimestamp = prevEventTimestamp.value();
+            if (_prevEventTimestamp != null && ctx.timestamp() >= nc && nc >= _prevEventTimestamp) {
+                cleanupExpiredEntries(nc, out);
+                nextCleanupTime.update(nc + cleanupIntervalMs);
+            }// trong luồng thực tế nếu nhiều event đến cùng lúc thì event đến đầu tiên sẽ trigger cleanup
+        }
         
         
         prevEventTimestamp.update(ctx.timestamp());
@@ -381,25 +392,6 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         return findsSortKey;
     }
     
-
-    
-    /**
-     * Register timer if not already registered
-     */
-    private void registerTimer(KeyedProcessFunction<String, Score, ScoreChangeEvent>.Context ctx, Collector<ScoreChangeEvent> out) throws Exception {
-        Long lc = lastCleanupTime.value();
-        long currentTime = ctx.timestamp();
-        if (lc == null ) {
-            // First time - register timers
-           
-            long nextCleanupTime = currentTime + cleanupIntervalMs * 2;
-            ctx.timerService().registerEventTimeTimer(nextCleanupTime);
-            lastCleanupTime.update(nextCleanupTime);
-          
-            out.collect(new ScoreChangeEvent(ScoreChangeEvent.ChangeType.DELETEALL));
-        }
-    }
-    
     /**
      * Process stale state when dataState key is expired but treeMap key still exists
      * This can happen when TTL expires dataState entries but treeMap hasn't been cleaned up yet
@@ -484,21 +476,6 @@ public class RetractableTopNFunction extends KeyedProcessFunction<String, Score,
         }
     }
     
-    @Override
-    public void onTimer(long timestamp, 
-                       KeyedProcessFunction<String, Score, ScoreChangeEvent>.OnTimerContext ctx, 
-                       Collector<ScoreChangeEvent> out) throws Exception {
-
-        // Handle cleanup timer if due
-        Long nextCleanup = lastCleanupTime.value();
-        if (nextCleanup != null && timestamp == nextCleanup) {
-            cleanupExpiredEntries(timestamp, out);
-            long rescheduleCleanup = timestamp + cleanupIntervalMs;
-            ctx.timerService().registerEventTimeTimer(rescheduleCleanup);
-            lastCleanupTime.update(rescheduleCleanup);
-            LOG.debug("Cleanup timer fired at timestamp: {}, next cleanup at: {}", timestamp, rescheduleCleanup);
-        }
-    }
     
     @Override
     public void close() throws Exception {
