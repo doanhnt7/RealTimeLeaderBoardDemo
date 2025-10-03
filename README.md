@@ -53,7 +53,10 @@ RealTimeLeaderBoardDemo/
 
 ## 🚀 Cách chạy dự án
 
-### 1. Khởi động toàn bộ hệ thống
+### 1. Yêu cầu cài đặt
+Bạn cần cài docker desktop qua https://www.docker.com/products/docker-desktop/
+
+### 2. Khởi động toàn bộ hệ thống
 
 ```bash
 # Clone repository
@@ -64,7 +67,7 @@ cd RealTimeLeaderBoardDemo
 docker-compose -f docker/docker-compose.yml up -d
 ```
 
-# Hiện tại đang disable luồng đẩy data vào mongoDB, data sẽ được đẩy thẳng vào kafka
+Hiện tại đang disable luồng đẩy data vào mongoDB, data sẽ được đẩy thẳng vào kafka
 
 ### 3. Truy cập các giao diện
 
