@@ -16,6 +16,9 @@ Dự án này mô phỏng một hệ thống leaderboard real-time với các th
 - **Monitoring**: Prometheus
 - **Visulization**: Grafa
 
+Luồng data: app-python -> kafka -> flink -> snapshot mongoDB/ leaderboard redis
+Luồng app-python -> mongoDB -> kafka qua debezium connector không còn được sử dụng
+
 ## Cấu trúc dự án
 
 ```
@@ -119,6 +122,17 @@ mvn clean package
 # - leaderboard_snapshot.ipynb: Tạo snapshot leaderboard
 # - compare.ipynb: So sánh kết quả Flink vs Spark
 ```
+## Các địa chỉ dịch vụ qua Cloudflare Tunnel
+
+Hoặc bạn có thể truy cập các dịch vụ qua các URL đã được expose công khai (dùng Cloudflare Tunnel để expose localhost, chưa đẩy lên server):
+
+- **Mongo Express**: [mongo-express.doanhnt.dpdns.org](https://mongo-express.doanhnt.dpdns.org)
+- **Kafka UI**: [kafka-ui.doanhnt.dpdns.org](https://kafka-ui.doanhnt.dpdns.org)
+- **Flink JobManager**: [jobmanager.doanhnt.dpdns.org](https://jobmanager.doanhnt.dpdns.org)
+- **Grafana**: [grafana.doanhnt.dpdns.org](https://grafana.doanhnt.dpdns.org)
+- **Spark UI**: [spark-ui.doanhnt.dpdns.org](https://spark-ui.doanhnt.dpdns.org)
+- **Jupyter Lab**: [jupiter.doanhnt.dpdns.org](https://jupiter.doanhnt.dpdns.org)
+- **Redis Insight**: [redis.doanhnt.dpdns.org](https://redis.doanhnt.dpdns.org)
 
 ---
 
