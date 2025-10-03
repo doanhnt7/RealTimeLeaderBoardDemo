@@ -118,7 +118,11 @@ python _04_main.py start-producer --rate 10 --num-user 200 --num-app 1
 ```bash
 # Build Flink job
 cd flink-jobs
-mvn clean package
+mvn clean package -DskipTests
+
+# Run test Flink job
+cd flink-jobs
+mvn test
 
 # Job sẽ tự động deploy khi container khởi động
 # Sau đó submit manual qua Flink Web UI
